@@ -1,0 +1,13 @@
+iopath==0.1.10
+matplotlib>=3.5.2
+numpy>=1.22.4
+pandas>=1.4.3
+Pillow==9.2.0
+requests==2.25.1
+scikit_learn>=1.1.1
+setuptools>=59.6.0
+torchvision==0.13.0
+tqdm==4.64.0
+TyXe @ git+https://github.com/TyXe-BDL/TyXe
+arff==0.9
+pystan==3.5.0
