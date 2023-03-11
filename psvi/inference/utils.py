@@ -155,3 +155,20 @@ def pred_on_grid(
 
     with torch.no_grad():
         return model(x_test.view(-1, 2)).squeeze(-1).softmax(-1).mean(0)
+    
+def process_wt_index(log_core_idcs, log_core_wts):
+    # these two lists should have the same length
+    log_core_idcs = [[int(x) for x in y] for y in log_core_idcs]
+    
+    idc_wt_list = []
+    
+    for counter, idc_list in enumerate(log_core_idcs):
+        this_wt = log_core_wts[counter]
+        this_wt_dict = {}
+        for index in idc_list:
+            this_wt_dict[index] = float(this_wt[index])
+        idc_wt_list.append(this_wt_dict)
+    return idc_wt_list 
+            
+    
+    

@@ -21,6 +21,10 @@ from psvi.inference.utils import *
 from torch.utils.data import DataLoader
 from psvi.inference.psvi_classes import SubsetPreservingTransforms
 from functools import partial
+from psvi.inference.utils import process_wt_index
+
+from psvi.models.frequentist_models import FreqLogReg, RunFrequentistModel
+
 
 r"""
     Implementations of baseline inference methods.
@@ -85,6 +89,10 @@ def run_random(
     random.seed(seed), np.random.seed(seed), torch.manual_seed(seed)
     w = torch.zeros(N).clone().detach()  # coreset weights
     nlls_random, accs_random, idcs_random, times_random, core_idcs = [], [], [], [0], []
+    
+    # at log_every iteration, log the indices and weights
+    log_core_idcs, log_core_wts = [], []
+    
     x_test_aug = torch.cat((xt, torch.ones(xt.shape[0], 1)), dim=1)
     x_aug = torch.cat((x, torch.ones(x.shape[0], 1)), dim=1)
     t_start = time.time()
@@ -124,21 +132,25 @@ def run_random(
                 test_acc.item()
             ), idcs_random.append(len(core_idcs))
             print(f"predictive accuracy: {(100*test_acc.item()):.2f}%")
+            
+            log_core_idcs.append(core_idcs.copy())
+            log_core_wts.append(w.numpy().tolist()) 
+            
+            
         new_coreset_point = random.choice(
             tuple(set(range(N)).difference(set(core_idcs)))
         )
         core_idcs.append(new_coreset_point)  # attach a new random point
         w[core_idcs] = N / len(core_idcs)
-    
-    print(core_idcs)
-    
+        
     # store results
+    wt_index = process_wt_index(log_core_idcs, log_core_wts)
     return {
         "accs": accs_random,
         "nlls": nlls_random,
         "csizes": idcs_random,
         "times": times_random[1:],
-        "indexes": core_idcs
+        "wt_index": wt_index,
     }
 
 
@@ -407,6 +419,11 @@ def run_sparsevi(
     )
 
     nlls_svi, accs_svi, idcs_svi, times_svi = [], [], [], [0]
+    
+    # at log_every iteration, log the indices and weights
+    log_core_idcs, log_core_wts = [], []
+
+    
     x_aug, x_test_aug = torch.cat((x, torch.ones(x.shape[0], 1)), dim=1), torch.cat(
         (xt, torch.ones(xt.shape[0], 1)), dim=1
     )
@@ -445,6 +462,12 @@ def run_sparsevi(
             accs_svi.append(test_acc.item())
             idcs_svi.append(len(core_idcs))
             print(f"predictive accuracy: {(100*test_acc.item()):.2f}%")
+            
+            log_core_idcs.append(core_idcs.copy())
+            log_core_wts.append(w.detach().numpy().tolist()) 
+
+            
+            
 
         # 1. Compute current coreset posterior using Laplace approximation on coreset points
         sub_idcs, sum_scaling = (
@@ -503,11 +526,12 @@ def run_sparsevi(
             )
             if corecorrs.shape[0] == 0 or corrs.max() > corecorrs.max():
                 pt_idx = sub_idcs[torch.argmax(corrs)]
-                print(f"\nAdding new point. Support increased to {len(core_idcs)+1} \n") if pt_idx not in core_idcs else print("\nImproving fit with current support \n")
+                #print(f"\nAdding new point. Support increased to {len(core_idcs)+1} \n") if pt_idx not in core_idcs else print("\nImproving fit with current support \n")
                 core_idcs.append(pt_idx) if pt_idx not in core_idcs else None
             else:
-                print("\nImproving fit with current support \n")
-            print(f"weights vector {(resc(N, w, core_idcs)*w[w>0]).sum()}")
+                pass 
+                #print("\nImproving fit with current support \n")
+            #print(f"weights vector {(resc(N, w, core_idcs)*w[w>0]).sum()}")
 
         # 4. Sample for updated weights and take projected gradient descent steps on the weights
         # sample from updated model
@@ -564,12 +588,14 @@ def run_sparsevi(
             with torch.no_grad():
                 torch.clamp_(w, 0)
     # store results
+    wt_index = process_wt_index(log_core_idcs, log_core_wts)
     return {
         "nlls": nlls_svi,
         "accs": accs_svi,
         "csizes": idcs_svi,
         "times": times_svi[1:],
-        "indexes": core_idcs
+        "wt_index": wt_index,
+
     }
 
 
@@ -1268,4 +1294,26 @@ def fit(
         "scale": 1.0 / np.sqrt(tau),
     }
     return results
+
+def run_frequentist_model(
+    x=None,
+    y=None,
+    xt=None,
+    yt=None,
+    data_minibatch=128,
+    num_epochs=100,
+    train_dataset=None,
+    test_dataset=None,
+    D=None
+): 
+    model = FreqLogReg(input_dim=D, num_classes=num_classes)
+
+    run_freq = RunFrequentistModel(
+        train_dataset=train_dataset, test_dataset=test_dataset, model=model
+    )
+
+    run_freq.train()
+    
+    
+    
 

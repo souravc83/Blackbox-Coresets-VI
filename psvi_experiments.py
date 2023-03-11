@@ -46,6 +46,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--fnm", default="results", type=str, help="Filename where results are stored"
 )
+
+parser.add_argument(
+    "--save_new_folder",
+    action=argparse.BooleanOptionalAction,
+    help="save results in a new folder",
+)
+
+
 parser.add_argument(
     "--datasets",
     default=["phishing"],
@@ -252,6 +260,8 @@ parser.add_argument(
     type=str,
     help="Folder where evaluation files get stored",
 )
+
+
 parser.add_argument(
     "--learn_z",
     action=argparse.BooleanOptionalAction,
@@ -272,6 +282,7 @@ parser.set_defaults(
     log_pseudodata=False,
     retrain_on_coreset=False, 
     learn_z=False,
+    save_new_folder=False
 )
 
 parsed_args = parser.parse_args()
@@ -544,10 +555,12 @@ def write_to_files(results: Dict[str, Any], fnm: str) -> None:
     r"""
     Write results to pk files
     """
-    res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
-    print(f"Storing results in {res_fnm}")
-    with open(res_fnm, "wb") as outfile:
-        pickle.dump(results, outfile)
+    #res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
+    #print(f"Storing results in {res_fnm}")
+    #with open(res_fnm, "wb") as outfile:
+    #    pickle.dump(results, outfile)
+    
+    #print(results)
         
     # save as json    
     json_fname = f"{method_args['results_folder']}/{fnm}.json"
