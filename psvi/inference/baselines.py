@@ -66,6 +66,47 @@ def run_laplace(
             else Normal(theta, prec**-0.5)
         )
         return laplace_approx.rsample((mc_samples,)).squeeze()
+    
+
+def evaluate_coreset_laplace(
+    x_core,
+    y_core,
+    w_core,
+    x_test,
+    y_test,
+    D,
+    lr0net=1e-3,  # initial learning rate for optimizer
+    seed=0,
+): 
+    """
+    Uses the laplace approximation to evaluate a coreset
+    """
+    # model params prior
+    mu0, sigma0 = (
+        torch.zeros(D + 1),
+        torch.ones(D + 1),
+    )
+    theta0 = Normal(mu0, sigma0).rsample()
+    theta = torch.nn.Parameter(theta0, requires_grad=True)
+    optim_net = torch.optim.Adam([theta], lr0net)
+    param_samples = run_laplace(
+        theta,
+        mu0,
+        sigma0,
+        x_core,
+        y_core,
+        w_core,
+        optim_net,
+        inner_it=1000,
+        diagonal=True,
+        mc_samples=mc_samples,
+        seed=seed,
+    )
+    test_probs = logreg_forward(param_samples, x_test)
+    test_acc = test_probs.gt(0.5).float().eq(y_test).float().mean()
+    test_nll = -dist.Bernoulli(probs=test_probs).log_prob(y_test).mean()
+    print(f"predictive accuracy: {(100*test_acc.item()):.2f}%")
+    
 
 
 def run_random(

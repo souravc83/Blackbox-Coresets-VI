@@ -563,7 +563,17 @@ def write_to_files(results: Dict[str, Any], fnm: str) -> None:
     #print(results)
         
     # save as json    
-    json_fname = f"{method_args['results_folder']}/{fnm}.json"
+    if method_args['save_new_folder']:
+        method_str = '_'.join(method_args['methods'])
+        dataset_str = '_'.join(method_args['datasets'])
+        json_foldername = os.path.join(
+            method_args['results_folder'], f'{method_str}_{dataset_str}'
+        )
+        os.mkdir(json_foldername)
+        json_fname = os.path.join(json_foldername, f'{fnm}.json')
+            
+    else:
+        json_fname = f"{method_args['results_folder']}/{fnm}.json"
     with open(json_fname, 'w') as fp:
         json.dump(results, fp)
 
