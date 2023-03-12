@@ -126,6 +126,17 @@ class RunFrequentistModel:
                 print(f"Epoch: {epoch}")
                 
                 test_func()
+    
+    def get_largest_el2n_indices(self, coreset_size):
+        """
+        returns a list of indices with the largest EL2N scores
+        """
+        el2n_arr = self.get_el2n_scores()
+        top_k = torch.topk(el2n_arr, coreset_size).indices
+        top_k_arr = top_k.detach().numpy().tolist()
+        return top_k_arr
+        
+        
                 
     
     def get_el2n_scores(self):
@@ -151,8 +162,7 @@ class RunFrequentistModel:
                 else:
                     outputs_prob = softmax_fn(output)
                 targets_onehot = F.one_hot(target.long(), num_classes=self.num_classes)
-                
-
+                                
                 el2n_score = torch.linalg.vector_norm(
                     x=(outputs_prob - targets_onehot),
                     ord=2,
