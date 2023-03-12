@@ -47,13 +47,14 @@ class RunFrequentistModel:
         
         self.train_dataloader = DataLoader(train_dataset, batch_size=data_minibatch, shuffle=True)
         self.test_dataloader = DataLoader(test_dataset, batch_size=data_minibatch, shuffle=True)
-        self.optimizer = optim.SGD(self.model.parameters(), lr=1e-3)
+        self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate)
         if self.is_logreg:
             self.criterion = torch.nn.BCEWithLogitsLoss()
         else:
             self.criterion = torch.nn.CrossEntropyLoss()
     
     def train_one_epoch_logreg(self):
+        running_loss = 0.0
         for batch_idx, (data, target) in enumerate(self.train_dataloader):
             #if args['cuda']:
                 #data, target = data.cuda(), target.cuda()
@@ -63,7 +64,12 @@ class RunFrequentistModel:
             loss = self.criterion(output.squeeze(), target)
             loss.backward()
             self.optimizer.step()
-
+            
+            # print statistics
+            running_loss += loss.item()
+            #if batch_idx % 200 == 0:    # print every 2000 mini-batches
+            #    print(f'batch: {batch_idx} loss: {running_loss / 200 }')
+            #    running_loss = 0.0
         
     
     def train_one_epoch(self):
@@ -96,12 +102,12 @@ class RunFrequentistModel:
     
     def test_logreg(self):
         test_acc, test_nll, total_eg = 0, 0, 0
-        softmax_fn = torch.nn.Softmax()
+        sigmoid_fn = torch.nn.Sigmoid()
         with torch.no_grad():
             for data, target in self.test_dataloader:
                 output = self.model(data)
-                outputs_prob = softmax_fn(output.squeeze())
-                test_acc += output.squeeze().gt(0.5).float().eq(target).sum()
+                outputs_prob = sigmoid_fn(output.squeeze())
+                test_acc += outputs_prob.gt(0.5).float().eq(target).sum()
                 test_nll += -dist.Bernoulli(probs=outputs_prob).log_prob(target).sum()
                 total_eg += target.size(0)
         test_acc = test_acc / total_eg
@@ -140,6 +146,7 @@ class RunFrequentistModel:
                 
     
     def get_el2n_scores(self):
+        sigmoid_fn = torch.nn.Sigmoid()
         softmax_fn = torch.nn.Softmax()
         n_train = len(self.train_dataset)
         
@@ -152,7 +159,7 @@ class RunFrequentistModel:
             for i, (data, target) in enumerate(el2n_dataloader):
                 output = self.model(data)
                 if self.is_logreg: 
-                    outputs_prob_1 = softmax_fn(output)
+                    outputs_prob_1 = sigmoid_fn(output)
                     outputs_prob_0 = 1. - outputs_prob_1 
                     outputs_prob = torch.hstack((
                         outputs_prob_0.unsqueeze(1),
@@ -162,7 +169,7 @@ class RunFrequentistModel:
                 else:
                     outputs_prob = softmax_fn(output)
                 targets_onehot = F.one_hot(target.long(), num_classes=self.num_classes)
-                                
+                                      
                 el2n_score = torch.linalg.vector_norm(
                     x=(outputs_prob - targets_onehot),
                     ord=2,
