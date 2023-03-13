@@ -17,6 +17,5 @@ nosetests.xml
 tmp/*
 build/*
 dist/*
-*.ipynb
 .ipynb_checkpoints/*
 .DS_Store
