@@ -13,7 +13,7 @@ import torch
 import torch.distributions as dist
 from torch.distributions.normal import Normal
 from typing import Any, Dict
-from psvi.models.logreg import model, laplace_precision, mcmc_sample, logreg_forward
+from psvi.models.logreg import model, laplace_precision, mcmc_sample, logreg_forward, stan_representation
 from psvi.models.neural_net import categorical_fn, gaussian_fn, VILinear
 from tqdm import tqdm
 from psvi.experiments.experiments_utils import set_up_model, update_hyperparams_dict
@@ -130,6 +130,8 @@ def run_random(
     r"""
     Returns diagnostics from a Laplace or an MCMC fit on a random subset of the training data
     """
+    #seed = 43
+    
     random.seed(seed), np.random.seed(seed), torch.manual_seed(seed)
     w = torch.zeros(N).clone().detach()  # coreset weights
     nlls_random, accs_random, idcs_random, times_random, core_idcs = [], [], [], [0], []
@@ -145,7 +147,7 @@ def run_random(
         # Evaluate predictive performance of current coreset posterior
         if it % log_every == 0:
             if mcmc:
-                param_samples = mcmc_sample(sml, core_idcs, x, y, w, seed=seed)
+                param_samples = mcmc_sample(stan_representation, core_idcs, x, y, w, seed=seed)
             else:
                 # model params prior
                 mu0, sigma0 = (

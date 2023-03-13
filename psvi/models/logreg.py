@@ -65,7 +65,7 @@ stan_representation = """
 """
 
 
-def mcmc_sample(sml, core_idcs, x, y, w, N_per=2000, seed=42, n_samples=5):
+def mcmc_sample(stan_representation, core_idcs, x, y, w, N_per=2000, seed=42, n_samples=5):
     np.random.seed(seed=seed)
     torch.manual_seed(seed)
     sampler_data = {
@@ -75,7 +75,7 @@ def mcmc_sample(sml, core_idcs, x, y, w, N_per=2000, seed=42, n_samples=5):
         "n": len(core_idcs),
         "w": w[core_idcs].detach().cpu().numpy(),
     }
-    sml = stan.build(stan_representation, data=sampler_data, seed=seed)
+    sml = stan.build(stan_representation, data=sampler_data)
     sampling_output = sml.sample(
         num_samples=N_per,
         chains=1,
