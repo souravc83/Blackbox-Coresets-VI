@@ -16,7 +16,9 @@ from psvi.inference.baselines import (
     run_random,
     run_sparsevi,
     run_mfvi_regressor,
-    run_mfvi_subset_regressor
+    run_mfvi_subset_regressor,
+    run_el2n_coreset,
+    run_kmeans
 )
 
 from psvi.inference.psvi_classes import (
@@ -353,6 +355,8 @@ inf_dict = {
     "mfvi_subset": run_mfvi_subset,
     "mfvi_regressor": run_mfvi_regressor,
     "mfvi_subset_regressor": run_mfvi_subset_regressor,
+    "el2n": run_el2n_coreset,
+    "kmeans": run_kmeans
 }
 
 
@@ -569,7 +573,8 @@ def write_to_files(results: Dict[str, Any], fnm: str) -> None:
         json_foldername = os.path.join(
             method_args['results_folder'], f'{method_str}_{dataset_str}'
         )
-        os.mkdir(json_foldername)
+        if not os.path.isdir(json_foldername):
+            os.mkdir(json_foldername)
         json_fname = os.path.join(json_foldername, f'{fnm}.json')
             
     else:

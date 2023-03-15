@@ -13,6 +13,7 @@ import torch
 import torch.distributions as dist
 from torch.distributions.normal import Normal
 from typing import Any, Dict
+
 from psvi.models.logreg import model, laplace_precision, mcmc_sample, logreg_forward, stan_representation
 from psvi.models.neural_net import categorical_fn, gaussian_fn, VILinear
 from tqdm import tqdm
@@ -77,6 +78,7 @@ def evaluate_coreset_laplace(
     D,
     lr0net=1e-3,  # initial learning rate for optimizer
     seed=0,
+    inner_it=1000,
     mc_samples=4
 ): 
     """
@@ -98,7 +100,7 @@ def evaluate_coreset_laplace(
         y_core,
         w_core,
         optim_net,
-        inner_it=1000,
+        inner_it=inner_it,
         diagonal=True,
         mc_samples=mc_samples,
         seed=seed,
@@ -1341,13 +1343,11 @@ def fit(
     }
     return results
 
-
-def run_el2n_coreset(
+def run_kmeans(
     x=None,
     y=None,
     xt=None,
     yt=None,
-    mc_samples=4,
     num_epochs=100,
     train_dataset=None,
     test_dataset=None,
@@ -1359,6 +1359,91 @@ def run_el2n_coreset(
     lr0net=1e-3,  # initial learning rate for optimizer
     nc=2,
     data_minibatch=128,
+    mc_samples=4,
+    inner_it=1000,
+    **kwargs,
+) -> Dict[str, Any]:
+    # setup 
+    random.seed(seed), np.random.seed(seed), torch.manual_seed(seed)
+    w = torch.zeros(N).clone().detach()  # coreset weights
+    nlls_random, accs_random, idcs_random, times_random, core_idcs = [], [], [], [0], []
+    x_test_aug = torch.cat((xt, torch.ones(xt.shape[0], 1)), dim=1)
+    x_aug = torch.cat((x, torch.ones(x.shape[0], 1)), dim=1)
+    t_start = time.time()
+    
+    # at log_every iteration, log the indices and weights
+    log_core_idcs, log_core_wts = [], []
+
+    num_classes = nc
+    N_train = len(train_dataset)
+
+    kmeans_cluster = KmeansCluster(x=x, y=y, num_classes=num_classes, seed=seed)
+    
+    for it in tqdm(range(num_epochs)):
+        if it % log_every == 0:
+            kmeans_cluster.set_num_clusters(it)
+            kmeans_cluster.run_kmeans()
+            
+            core_idcs = kmeans_cluster.get_arbitrary_pts()
+            #core_idcs = np.random.randint(low=0,high=N_train, size=it)
+            
+            test_acc, test_nll = evaluate_coreset_laplace(
+                x_core=x_aug[core_idcs, :],
+                y_core=y[core_idcs],
+                w_core=w[core_idcs],
+                x_test=x_test_aug,
+                y_test=yt,
+                D=D,
+                lr0net=lr0net,  # initial learning rate for optimizer
+                seed=0,
+                inner_it=inner_it,
+                mc_samples=mc_samples
+            )
+            
+            if len(core_idcs) > 0: 
+                w[core_idcs] = N / len(core_idcs)
+                
+            nlls_random.append(test_nll.item())
+            accs_random.append(test_acc.item())
+            idcs_random.append(len(core_idcs))
+            
+            log_core_idcs.append(core_idcs.copy())
+            log_core_wts.append(w.numpy().tolist()) 
+
+    wt_index = process_wt_index(log_core_idcs, log_core_wts)
+    
+    return {
+        "accs": accs_random,
+        "nlls": nlls_random,
+        "csizes": idcs_random,
+        "times": times_random[1:],
+        "wt_index": wt_index,
+    }
+
+
+
+    
+
+
+
+def run_el2n_coreset(
+    x=None,
+    y=None,
+    xt=None,
+    yt=None,
+    num_epochs=100,
+    train_dataset=None,
+    test_dataset=None,
+    log_every=10,
+    N=None,
+    D=None,
+    seed=0,
+    mcmc=False,
+    lr0net=1e-3,  # initial learning rate for optimizer
+    nc=2,
+    data_minibatch=128,
+    mc_samples=4,
+    inner_it=1000,
     **kwargs,
 ) -> Dict[str, Any]:
     
@@ -1375,7 +1460,9 @@ def run_el2n_coreset(
 
     
     num_classes = nc
-    init_epochs = 20
+    init_epochs = 21
+    
+    N_train = len(train_dataset)
     
     model = FreqLogReg(input_dim=D, num_classes=num_classes)
 
@@ -1389,6 +1476,7 @@ def run_el2n_coreset(
     for it in tqdm(range(num_epochs)):
         if it % log_every == 0:
             core_idcs = run_freq.get_largest_el2n_indices(it)
+            #core_idcs = np.random.randint(low=0,high=N_train, size=it)
             
             test_acc, test_nll = evaluate_coreset_laplace(
                 x_core=x_aug[core_idcs, :],
@@ -1399,6 +1487,8 @@ def run_el2n_coreset(
                 D=D,
                 lr0net=lr0net,  # initial learning rate for optimizer
                 seed=0,
+                inner_it=inner_it,
+                mc_samples=mc_samples
             )
             
             if len(core_idcs) > 0: 

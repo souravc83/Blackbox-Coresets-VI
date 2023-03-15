@@ -8,6 +8,12 @@ import torch
 import torch.distributions as dist
 from psvi.models.neural_net import VILinear
 from torch.utils.data import DataLoader
+from sklearn.cluster import KMeans
+from collections import defaultdict
+import numpy as np
+import time
+
+
 
 def pseudo_subsample_init(x, y, num_pseudo=20, nc=2, seed=0):
     r"""
@@ -171,4 +177,53 @@ def process_wt_index(log_core_idcs, log_core_wts):
     return idc_wt_list 
             
     
+class KmeansCluster():
+    def __init__(self, x, y, num_classes=2, 
+                 balance=True, seed=None):
+        self.x = x 
+        self.y = y 
+        self.balance = balance
+        self.num_classes = num_classes
+        
+        self.kmeans_dict = []
+        self.cluster_centers = []
+        if seed is None:
+            self.seed = time.time() 
+        else:
+            self.seed = seed
     
+    def set_num_clusters(self, num_clusters):
+        self.num_clusters = num_clusters
+        self.pts_per_class = int(np.floor(num_clusters / self.num_classes))
+        if self.pts_per_class < 2:
+            self.pts_per_class = 2
+        
+    
+    def run_kmeans(self):
+        # reset
+        self.kmeans_dict = []
+        self.cluster_centers = []
+        
+        for class_index in range(self.num_classes):
+            indices = np.where(self.y.int().numpy() == class_index)[0]
+            this_x = self.x.numpy()[indices]
+            kmeans = KMeans(
+                n_clusters=self.pts_per_class, 
+                random_state=self.seed, n_init="auto").fit(this_x)
+            this_kmeans_dict = defaultdict(list)
+            for counter, label in enumerate(kmeans.labels_):
+                this_kmeans_dict[label].append(indices[counter])
+            
+            self.kmeans_dict.append(this_kmeans_dict)
+            self.cluster_centers.append(kmeans.cluster_centers_)
+                
+                
+    def get_arbitrary_pts(self):
+        core_idcs = []
+        for this_kmeans_dict in self.kmeans_dict:
+            for k in this_kmeans_dict.keys():
+                if len(this_kmeans_dict[k]) > 0: 
+                    core_idcs.append(this_kmeans_dict[k][0])
+        
+        return core_idcs
+        
