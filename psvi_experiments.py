@@ -18,7 +18,8 @@ from psvi.inference.baselines import (
     run_mfvi_regressor,
     run_mfvi_subset_regressor,
     run_el2n_coreset,
-    run_kmeans
+    run_kmeans,
+    run_selection_with_mfvi
 )
 
 from psvi.inference.psvi_classes import (
@@ -356,7 +357,8 @@ inf_dict = {
     "mfvi_regressor": run_mfvi_regressor,
     "mfvi_subset_regressor": run_mfvi_subset_regressor,
     "el2n": run_el2n_coreset,
-    "kmeans": run_kmeans
+    "kmeans": run_kmeans,
+    "mfvi_selection": run_selection_with_mfvi,
 }
 
 
@@ -393,7 +395,7 @@ def experiment_driver(
             ) and method_args["compute_weights_entropy"]
             tps = (
                 method_args["coreset_sizes"]
-                if nm_alg.startswith(("psvi", "opsvi", "mfvi_subset"))
+                if nm_alg.startswith(("psvi", "opsvi", "mfvi_subset", "mfvi_selection"))
                 else [-1]
             )  # alias for baselines with no explicit constraint on dataset size
             for t in range(method_args["num_trials"]):

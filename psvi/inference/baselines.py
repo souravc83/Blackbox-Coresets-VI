@@ -1510,3 +1510,226 @@ def run_el2n_coreset(
         "times": times_random[1:],
         "wt_index": wt_index,
     }
+
+
+
+
+class MfviSelect:
+    def __init__(self, 
+                 x=None,
+                 y=None,
+                 xt=None,
+                 yt=None,
+                 dnm=None, 
+                 train_dataset=None, 
+                 test_dataset=None, 
+                 data_minibatch=128,
+                 num_pseudo=100, 
+                 nc=2, 
+                 architecture='logistic_regression', 
+                 D=None, 
+                 n_hidden=100, 
+                 mc_samples=4, 
+                 init_sd = None,
+                 lr0net=1e-3, 
+                 num_epochs=100, 
+                 log_every=10, 
+                 distr_fn=categorical_fn, 
+                 seed=0,
+                 mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
+                 log_pseudodata=False
+):
+        self.x = x
+        self.y = y
+        self.xt = xt
+        self.yt = yt
+        self.dnm = dnm
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
+        self.data_minibatch = data_minibatch
+        self.num_pseudo = num_pseudo
+        self.nc = nc
+        self.architecture = architecture
+        self.D = D
+        self.n_hidden = n_hidden
+        self.mc_samples = mc_samples
+        self.init_sd = init_sd 
+        self.lr0net = lr0net
+        self.num_epochs = num_epochs
+        self.log_every = log_every
+        self.distr_fn = distr_fn
+        self.seed = seed
+        self.mul_fact = mul_fact
+        self.log_pseudodata = log_pseudodata
+    
+    def select_data(self):
+        if self.dnm=="MNIST":
+            train_loader = DataLoader(
+                self.train_dataset,
+                batch_size=self.data_minibatch,
+                # pin_memory=True,
+                shuffle=True,
+            )
+            n_train = len(train_loader.dataset)
+
+            points_per_class = [self.num_pseudo // self.nc] * self.nc  # split equally among classes
+            points_per_class[-1] = self.num_pseudo - sum(points_per_class[:-1])
+            
+            self.ybatch = (
+                torch.tensor(
+                    [
+                        item
+                        for sublist in [[i] * ppc for i, ppc in enumerate(points_per_class)]
+                        for item in sublist
+                    ]
+                )
+                .float()
+                .to(device, non_blocking=True)
+            )
+
+            def get_x_from_label(ipc, _l):
+                indices = (
+                    torch.as_tensor(self.train_dataset.targets).clone().detach() == _l
+                ).nonzero()
+                return torch.utils.data.DataLoader(
+                    SubsetPreservingTransforms(self.train_dataset, indices=indices, dnm=self.dnm),
+                    batch_size=ipc,
+                    shuffle=True,
+                )
+
+            distilled_lst = []
+            for c in range(nc):
+                u0 = next(iter(get_x_from_label(points_per_class[c], c)))
+                distilled_lst.append(u0.to(device=device, non_blocking=True))
+            self.xbatch = torch.cat(distilled_lst).to(device, non_blocking=True)
+
+        else:
+            self.xbatch, self.ybatch = (
+               pseudo_subsample_init(self.x, self.y, num_pseudo=self.num_pseudo, seed=self.seed, nc=self.nc)
+            )
+
+    
+    def evaluate_coreset(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        random.seed(self.seed), np.random.seed(self.seed), torch.manual_seed(self.seed)
+        nlls_mfvi, accs_mfvi, times_mfvi, elbos_mfvi, grid_preds = [], [], [0], [], []
+        t_start = time.time()
+        net = set_up_model(
+            architecture=self.architecture, D=self.D, n_hidden=self.n_hidden, nc=self.nc, 
+            mc_samples=self.mc_samples, init_sd=self.init_sd,
+        ).to(device)
+        
+
+        n_train = len(self.train_dataset)
+        test_loader = DataLoader(
+            self.test_dataset,
+            batch_size=self.data_minibatch,
+            pin_memory=True,
+            shuffle=True,
+        )
+        
+        optim_vi = torch.optim.Adam(net.parameters(), self.lr0net)
+        sum_scaling = n_train / self.num_pseudo
+        total_iterations = self.mul_fact * self.num_epochs
+        checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
+        lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+        for i in tqdm(range(total_iterations)):
+            self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
+            optim_vi.zero_grad()
+
+            data_nll = (
+                -sum_scaling
+                * self.distr_fn(logits=net(self.xbatch).squeeze(-1)).log_prob(self.ybatch).sum()
+            )
+            kl = sum(m.kl() for m in net.modules() if isinstance(m, VILinear))
+            mfvi_loss = data_nll + kl
+            mfvi_loss.backward()
+            optim_vi.step()
+            with torch.no_grad():
+                elbos_mfvi.append(-mfvi_loss.item())
+            if i % self.log_every == 0:
+                total, test_nll, corrects = 0, 0, 0
+                for xt, yt in test_loader:
+                    xt, yt = xt.to(device, non_blocking=True), yt.to(
+                        device, non_blocking=True
+                    )
+                    with torch.no_grad():
+                        test_logits = net(xt).squeeze(-1).mean(0)
+                        corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
+                        total += yt.size(0)
+                        test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
+                        if self.log_pseudodata and i in lpit:
+                            grid_preds.append(pred_on_grid(net, device=
+                            device).detach().cpu().numpy().T)
+                times_mfvi.append(times_mfvi[-1] + time.time() - t_start)
+                nlls_mfvi.append((test_nll / float(total)).item())
+                accs_mfvi.append((corrects / float(total)).item())
+                print(f"predictive accuracy: {(100*accs_mfvi[-1]):.2f}%")
+        # store results
+        results = {
+            "accs": accs_mfvi,
+            "nlls": nlls_mfvi,
+            "times": times_mfvi[1:],
+            "elbos": elbos_mfvi,
+            "csizes": [self.num_pseudo] * (self.mul_fact * self.num_epochs),
+        }
+        if log_pseudodata:
+            results["grid_preds"] = grid_preds
+            results["us"], results["zs"], results["vs"] = self.xbatch.detach(), self.ybatch.detach(), [sum_scaling]*self.num_pseudo
+        return results
+
+
+def run_selection_with_mfvi(
+    x=None,
+    y=None,
+    xt=None,
+    yt=None,
+    mc_samples=4,
+    data_minibatch=128,
+    num_epochs=100,
+    log_every=10,
+    D=None,
+    lr0net=1e-3,  # initial learning rate for optimizer
+    mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
+    seed=0,
+    distr_fn=categorical_fn,
+    log_pseudodata=False,
+    train_dataset=None,
+    test_dataset=None,
+    num_pseudo=100,  # constrain on random subset with size equal to the max coreset size in the experiment
+    init_args="subsample",
+    architecture=None,
+    n_hidden=None,
+    nc=2,
+    dnm=None,
+    init_sd=None,
+    **kwargs,
+): 
+    mfvi_select = MfviSelect(
+        x=x,
+        y=y,
+        xt=xt,
+        yt=yt,
+        dnm=dnm, 
+        train_dataset=train_dataset, 
+        test_dataset=test_dataset, 
+        data_minibatch=data_minibatch,
+        num_pseudo=num_pseudo, 
+        nc=nc, 
+        architecture=architecture, 
+        D=D, 
+        n_hidden=n_hidden, 
+        mc_samples=mc_samples, 
+        init_sd=init_sd,
+        lr0net=1e-3, 
+        num_epochs=100, 
+        log_every=10, 
+        distr_fn=categorical_fn, 
+        seed=0,
+        mul_fact=2,
+        log_pseudodata=log_pseudodata
+    )
+    
+    mfvi_select.select_data()
+    return mfvi_select.evaluate_coreset()
+    
