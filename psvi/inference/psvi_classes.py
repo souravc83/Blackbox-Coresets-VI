@@ -256,6 +256,11 @@ class PSVI(object):
                 )
             )
 
+    def custom_init(self):
+        raise ValueError("If you reach here, this should be implemented by a child class")
+        
+    
+    
     def psvi_elbo(self, xbatch, ybatch, model=None, params=None, hyperopt=False):
         r"""
         PSVI objective computation [negative PSVI-ELBO]
@@ -661,6 +666,7 @@ class PSVI(object):
         pseudodata_init = {
             "random": self.pseudo_rand_init,  # different transformations applied on `train_dataset`
             "subsample": self.pseudo_subsample_init,
+            "custom": self.custom_init
         }
         pseudodata_init[self.init_args]()
         # optimization method

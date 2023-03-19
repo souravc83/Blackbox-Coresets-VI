@@ -1630,17 +1630,24 @@ class MfviSelect:
         
         optim_vi = torch.optim.Adam(net.parameters(), self.lr0net)
         sum_scaling = n_train / self.num_pseudo
+        
+        wt_vec = sum_scaling * torch.ones(self.num_pseudo)
+        
+        
         total_iterations = self.mul_fact * self.num_epochs
         checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
         lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+        
         for i in tqdm(range(total_iterations)):
             self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
             optim_vi.zero_grad()
-
+            
             data_nll = (
-                -sum_scaling
-                * self.distr_fn(logits=net(self.xbatch).squeeze(-1)).log_prob(self.ybatch).sum()
+                -wt_vec.dot(
+                    self.distr_fn(logits=net(self.xbatch).squeeze(-1)).log_prob(self.ybatch).sum(0)
+                )
             )
+            
             kl = sum(m.kl() for m in net.modules() if isinstance(m, VILinear))
             mfvi_loss = data_nll + kl
             mfvi_loss.backward()
@@ -1673,7 +1680,7 @@ class MfviSelect:
             "elbos": elbos_mfvi,
             "csizes": [self.num_pseudo] * (self.mul_fact * self.num_epochs),
         }
-        if log_pseudodata:
+        if self.log_pseudodata:
             results["grid_preds"] = grid_preds
             results["us"], results["zs"], results["vs"] = self.xbatch.detach(), self.ybatch.detach(), [sum_scaling]*self.num_pseudo
         return results
@@ -1721,12 +1728,12 @@ def run_selection_with_mfvi(
         n_hidden=n_hidden, 
         mc_samples=mc_samples, 
         init_sd=init_sd,
-        lr0net=1e-3, 
-        num_epochs=100, 
-        log_every=10, 
+        lr0net=lr0net, 
+        num_epochs=num_epochs, 
+        log_every=log_every, 
         distr_fn=categorical_fn, 
-        seed=0,
-        mul_fact=2,
+        seed=seed,
+        mul_fact=mul_fact,
         log_pseudodata=log_pseudodata
     )
     
