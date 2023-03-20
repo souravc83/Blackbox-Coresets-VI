@@ -7,11 +7,12 @@
 import torch
 import torch.distributions as dist
 from psvi.models.neural_net import VILinear
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from sklearn.cluster import KMeans
 from collections import defaultdict
 import numpy as np
 import time
+from typing import List
 
 
 
@@ -226,4 +227,96 @@ class KmeansCluster():
                     core_idcs.append(this_kmeans_dict[k][0])
         
         return core_idcs
+
+class WeightedSubset(torch.utils.data.Subset):
+    def __init__(self, dataset, indices, weights) -> None:
+        self.dataset = dataset
+        assert len(indices) == len(weights)
+        self.indices = indices
+        self.weights = weights
+
+    def __getitem__(self, idx):
+        data, target = self.dataset[self.indices[idx]]
+        return data, target, self.weights[idx]
+
+
+    
+class Selection():
+    def __init__(self, train_dataset, num_pseudo,  nc, seed):
+        self.train_dataset = train_dataset
+        self.num_pseudo = num_pseudo
+        self.nc = nc
+        self.seed = seed
+        self.core_idc = []
+        self.chosen_dataset = None
+    
+    def select(self) -> List[int]:
+        """
+        get the selected indices
+        """
+        raise NotImplementedError("Child class must implement selection")
+    
+    def get_subset(self): 
+        """
+        get the subset of the torch dataset
+        """
+        # TODO: implement weighted subset from 
+        # https://github.com/souravc83/deepcore_coresets/blob/b6438c5ce4517df31590d38ea1c480be574a534a/utils.py#L10
+        
+        self.core_idc = self.select()
+        self.chosen_dataset = Subset(self.train_dataset, self.core_idc)
+        return self.chosen_dataset 
+    
+    def get_weighted_subset(self):
+        # initialize the weights
+        n_train = len(self.train_dataset)
+        scaling_factor = n_train / self.num_pseudo
+        wt_vec = scaling_factor * torch.ones(self.num_pseudo)
+        
+        self.core_idc = self.select()
+        
+        self.chosen_dataset = WeightedSubset(
+            dataset=self.train_dataset,
+            indices=self.core_idc,
+            weights = wt_vec
+        )
+        
+        return self.chosen_dataset
+    
+
+class RandomSelection(Selection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed):
+        super().__init__(train_dataset, num_pseudo,  nc, seed)
+
+    def select(self):
+        n_train = len(self.train_dataset)
+        pts_per_class = self.num_pseudo//self.nc
+        core_idc = []
+        
+        pts_in_last_class = self.num_pseudo - (self.nc - 1) * pts_per_class
+        for c in range(self.nc):
+            idx_c = np.arange(n_train)[self.train_dataset.targets == c]
+            if c == (self.nc - 1):
+                num_pts = pts_in_last_class
+            else:
+                num_pts = pts_per_class
+            chosen_idx = np.random.choice(idx_c, num_pts, replace=False)
+            core_idc = core_idc + chosen_idx.tolist()
+        
+        return core_idc
+        
+        
+    
+            
+class KmeansSelection(Selection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed):
+        super().__init__(train_dataset, num_pseudo,  nc, seed)
+    
+    def select(self):
+        pass 
+
+
+    
+        
+        
         

@@ -1607,6 +1607,7 @@ class MfviSelect:
             self.xbatch, self.ybatch = (
                pseudo_subsample_init(self.x, self.y, num_pseudo=self.num_pseudo, seed=self.seed, nc=self.nc)
             )
+            
 
     
     def evaluate_coreset(self):
@@ -1638,20 +1639,39 @@ class MfviSelect:
         checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
         lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
         
+        
+        select_method = RandomSelection(
+            train_dataset=self.train_dataset,
+            num_pseudo = self.num_pseudo,
+            nc=self.nc,
+            seed=self.seed
+        )
+        
+        chosen_dataset = select_method.get_weighted_subset()
+        
+        #chosen_dataset = torch.utils.data.TensorDataset(self.xbatch, self.ybatch)
+        chosen_loader = torch.utils.data.DataLoader(chosen_dataset, batch_size=128)
+        
+        
         for i in tqdm(range(total_iterations)):
-            self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
-            optim_vi.zero_grad()
+            for xbatch_, ybatch_, weights_,  in chosen_loader:
+                #self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
+                xbatch_ = xbatch_.to(device)
+                ybatch_ = ybatch_.to(device)
             
-            data_nll = (
-                -wt_vec.dot(
-                    self.distr_fn(logits=net(self.xbatch).squeeze(-1)).log_prob(self.ybatch).sum(0)
+                optim_vi.zero_grad()
+
+                data_nll = (
+                    - weights_.dot(
+                        self.distr_fn(logits=net(xbatch_).squeeze(-1)).log_prob(ybatch_).sum(0)
+                    )
                 )
-            )
+
+                kl = sum(m.kl() for m in net.modules() if isinstance(m, VILinear))
+                mfvi_loss = data_nll + kl
+                mfvi_loss.backward()
+                optim_vi.step()
             
-            kl = sum(m.kl() for m in net.modules() if isinstance(m, VILinear))
-            mfvi_loss = data_nll + kl
-            mfvi_loss.backward()
-            optim_vi.step()
             with torch.no_grad():
                 elbos_mfvi.append(-mfvi_loss.item())
             if i % self.log_every == 0:
