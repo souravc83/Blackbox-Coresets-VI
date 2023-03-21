@@ -1575,7 +1575,7 @@ class MfviSelect:
             points_per_class = [self.num_pseudo // self.nc] * self.nc  # split equally among classes
             points_per_class[-1] = self.num_pseudo - sum(points_per_class[:-1])
             
-            self.ybatch = (
+            ybatch = (
                 torch.tensor(
                     [
                         item
@@ -1601,12 +1601,34 @@ class MfviSelect:
             for c in range(nc):
                 u0 = next(iter(get_x_from_label(points_per_class[c], c)))
                 distilled_lst.append(u0.to(device=device, non_blocking=True))
-            self.xbatch = torch.cat(distilled_lst).to(device, non_blocking=True)
+            xbatch = torch.cat(distilled_lst).to(device, non_blocking=True)
+            
+            self.chosen_dataset = torch.utils.data.TensorDataset(self.xbatch, self.ybatch)
 
         else:
-            self.xbatch, self.ybatch = (
-               pseudo_subsample_init(self.x, self.y, num_pseudo=self.num_pseudo, seed=self.seed, nc=self.nc)
+            select_method = EL2NSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed
             )
+            
+            select_method.pretrain(
+                test_dataset=self.test_dataset,
+                architecture=self.architecture,
+                D=self.D,
+                n_hidden=self.n_hidden,
+                distr_fn=self.distr_fn,
+                mc_samples=self.mc_samples,
+                init_sd=self.init_sd,
+                data_minibatch=self.data_minibatch,
+                pretrain_epochs=20,
+                lr0net=self.lr0net, 
+                log_every=10
+            )
+        
+            self.chosen_dataset = select_method.get_weighted_subset()
+
             
 
     
@@ -1640,17 +1662,7 @@ class MfviSelect:
         lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
         
         
-        select_method = RandomSelection(
-            train_dataset=self.train_dataset,
-            num_pseudo = self.num_pseudo,
-            nc=self.nc,
-            seed=self.seed
-        )
-        
-        chosen_dataset = select_method.get_weighted_subset()
-        
-        #chosen_dataset = torch.utils.data.TensorDataset(self.xbatch, self.ybatch)
-        chosen_loader = torch.utils.data.DataLoader(chosen_dataset, batch_size=128)
+        chosen_loader = torch.utils.data.DataLoader(self.chosen_dataset, batch_size=128)
         
         
         for i in tqdm(range(total_iterations)):
@@ -1658,6 +1670,7 @@ class MfviSelect:
                 #self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
                 xbatch_ = xbatch_.to(device)
                 ybatch_ = ybatch_.to(device)
+                weights_ = weights_.to(device)
             
                 optim_vi.zero_grad()
 
@@ -1760,3 +1773,8 @@ def run_selection_with_mfvi(
     mfvi_select.select_data()
     return mfvi_select.evaluate_coreset()
     
+
+
+
+
+        

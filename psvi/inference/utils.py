@@ -6,13 +6,17 @@
 
 import torch
 import torch.distributions as dist
-from psvi.models.neural_net import VILinear
+import torch.nn.functional as F
+from psvi.models.neural_net import VILinear, categorical_fn
 from torch.utils.data import DataLoader, Subset
 from sklearn.cluster import KMeans
 from collections import defaultdict
 import numpy as np
 import time
 from typing import List
+import random
+from psvi.experiments.experiments_utils import set_up_model
+from tqdm import tqdm
 
 
 
@@ -178,6 +182,122 @@ def process_wt_index(log_core_idcs, log_core_wts):
     return idc_wt_list 
             
     
+class MeanFieldVI():
+    """
+    same as run_mfvi, but puts it inside a class
+    """
+    def __init__(
+        self,
+        xt=None,
+        yt=None,
+        mc_samples=4,
+        data_minibatch=128,
+        num_epochs=100,
+        log_every=10,
+        N=None,
+        D=None,
+        lr0net=1e-3,  # initial learning rate for optimizer
+        mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
+        seed=0,
+        distr_fn=categorical_fn,
+        architecture=None,
+        n_hidden=None,
+        nc=2,
+        log_pseudodata=False,
+        train_dataset=None,
+        test_dataset=None,
+        init_sd=None,
+        **kwargs,
+    ):
+        self.mc_samples = mc_samples
+        self.data_minibatch = data_minibatch
+        self.num_epochs = num_epochs
+        self.log_every = log_every
+        self.N = N
+        self.D = D
+        self.lr0net = lr0net
+        self.seed = seed
+        self.distr_fn = distr_fn
+        self.architecture = architecture
+        self.n_hidden = n_hidden
+        self.nc = nc
+        self.log_pseudodata = log_pseudodata
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
+        self.init_sd = init_sd
+        self.mul_fact = mul_fact
+    
+    def run(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        random.seed(self.seed), np.random.seed(self.seed), torch.manual_seed(self.seed)
+        nlls_mfvi, accs_mfvi, times_mfvi, elbos_mfvi, grid_preds = [], [], [0], [], []
+        t_start = time.time()
+        self.net = set_up_model(
+            architecture=self.architecture, 
+            D=self.D, 
+            n_hidden=self.n_hidden, 
+            nc=self.nc, 
+            mc_samples=self.mc_samples, 
+            init_sd=self.init_sd, 
+        ).to(device)
+
+        train_loader = DataLoader(
+            self.train_dataset,
+            batch_size=self.data_minibatch,
+            pin_memory=True,
+            shuffle=False,
+        )
+        n_train = len(train_loader.dataset)
+        
+        test_loader = DataLoader(
+            self.test_dataset,
+            batch_size=self.data_minibatch,
+            pin_memory=True,
+            shuffle=True,
+        )
+
+        optim_vi = torch.optim.Adam(self.net.parameters(), self.lr0net)
+        total_iterations = self.mul_fact * self.num_epochs
+        checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
+        lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+        
+        for i in tqdm(range(total_iterations)):
+            xbatch, ybatch = next(iter(train_loader))
+            xbatch, ybatch = xbatch.to(device, non_blocking=True), ybatch.to(
+                device, non_blocking=True
+            )
+            optim_vi.zero_grad()
+            data_nll = -(
+                n_train
+                / xbatch.shape[0]
+                * self.distr_fn(logits=self.net(xbatch).squeeze(-1)).log_prob(ybatch).sum()
+            )
+            kl = sum(m.kl() for m in self.net.modules() if isinstance(m, VILinear))
+            mfvi_loss = data_nll + kl
+            mfvi_loss.backward()
+            optim_vi.step()
+            with torch.no_grad():
+                elbos_mfvi.append(-mfvi_loss.item())
+            if i % self.log_every == 0 or i == total_iterations -1:
+                total, test_nll, corrects = 0, 0, 0
+                for xt, yt in test_loader:
+                    xt, yt = xt.to(device, non_blocking=True), yt.to(
+                        device, non_blocking=True
+                    )
+                    with torch.no_grad():
+                        test_logits = self.net(xt).squeeze(-1).mean(0)
+                        corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
+                        total += yt.size(0)
+                        test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
+                times_mfvi.append(times_mfvi[-1] + time.time() - t_start)
+                nlls_mfvi.append((test_nll / float(total)).item())
+                accs_mfvi.append((corrects / float(total)).item())
+                print(f"predictive accuracy: {(100*accs_mfvi[-1]):.2f}%")
+
+
+                
+                
+    
 class KmeansCluster():
     def __init__(self, x, y, num_classes=2, 
                  balance=True, seed=None):
@@ -283,6 +403,48 @@ class Selection():
         
         return self.chosen_dataset
     
+    def pretrain(
+        self,
+        test_dataset,
+        architecture,
+        D,
+        n_hidden,
+        distr_fn,
+        mc_samples,
+        init_sd,
+        data_minibatch,
+        pretrain_epochs,
+        lr0net, 
+        log_every):
+        """
+        A number of models require pretraining the net.
+        This uses MFVI to pretrain the net on the training dataset
+        """
+        self.pretrained_vi = MeanFieldVI(
+
+            mc_samples=mc_samples,
+            data_minibatch=data_minibatch,
+            num_epochs=pretrain_epochs,
+            log_every=log_every,
+            N=len(self.train_dataset),
+            D=D,
+            lr0net=lr0net,  # initial learning rate for optimizer
+            mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
+            seed=self.seed,
+            distr_fn=categorical_fn,
+            architecture=architecture,
+            n_hidden=n_hidden,
+            nc=self.nc,
+            train_dataset=self.train_dataset,
+            test_dataset=test_dataset,
+            init_sd=init_sd,
+        )
+        
+        self.pretrained_vi.run()
+
+    
+    
+    
 
 class RandomSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed):
@@ -304,8 +466,6 @@ class RandomSelection(Selection):
             core_idc = core_idc + chosen_idx.tolist()
         
         return core_idc
-        
-        
     
             
 class KmeansSelection(Selection):
@@ -313,7 +473,53 @@ class KmeansSelection(Selection):
         super().__init__(train_dataset, num_pseudo,  nc, seed)
     
     def select(self):
-        pass 
+        train_x = self.train_dataset.data
+        train_y = self.train_dataset.targets
+        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
+        kmeans_cluster.set_num_clusters(self.num_pseudo)
+        kmeans_cluster.run_kmeans()
+        core_idc = kmeans_cluster.get_arbitrary_pts()
+        return core_idc
+
+
+class EL2NSelection(Selection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed):
+        super().__init__(train_dataset, num_pseudo,  nc, seed)
+
+    def select(self):
+        # make sure this is pretrained
+        el2n_arr = self._get_el2n_score()
+        top_k = torch.topk(el2n_arr, self.num_pseudo).indices
+        top_k_arr = top_k.detach().numpy().tolist()
+        
+        return top_k_arr
+
+    
+    def _get_el2n_score(self):
+        softmax_fn = torch.nn.Softmax()
+        n_train = len(self.train_dataset)
+        data_minibatch = 128
+        
+        el2n_arr = torch.zeros(n_train, requires_grad=False)
+        # shuffle=False is very important for this
+        el2n_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+        
+        with torch.no_grad():
+            for i, (data, target) in enumerate(el2n_dataloader):
+                output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
+                outputs_prob = softmax_fn(output)
+                targets_onehot = F.one_hot(target.long(), num_classes=self.nc)
+                el2n_score = torch.linalg.vector_norm(
+                    x=(outputs_prob - targets_onehot),
+                    ord=2,
+                    dim=1
+                )
+                
+                el2n_arr[i * data_minibatch: min((i + 1) * data_minibatch, n_train)] = el2n_score
+        
+        return el2n_arr
+
+
 
 
     
