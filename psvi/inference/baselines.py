@@ -1622,7 +1622,7 @@ class MfviSelect:
                 mc_samples=self.mc_samples,
                 init_sd=self.init_sd,
                 data_minibatch=self.data_minibatch,
-                pretrain_epochs=20,
+                pretrain_epochs=2,
                 lr0net=self.lr0net, 
                 log_every=10
             )

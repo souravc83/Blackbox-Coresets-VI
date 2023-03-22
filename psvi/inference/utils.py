@@ -227,11 +227,31 @@ class MeanFieldVI():
         self.init_sd = init_sd
         self.mul_fact = mul_fact
     
-    def run(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def train_an_epoch(self):
+        for xbatch, ybatch in self.train_loader:
+            xbatch, ybatch = xbatch.to(self.device, non_blocking=True), ybatch.to(
+                self.device, non_blocking=True
+            )
+            
+            self.optim_vi.zero_grad()
+            scaling_factor = self.n_train / xbatch.shape[0]
+            data_nll = -(
+               scaling_factor
+                * self.distr_fn(logits=self.net(xbatch).squeeze(-1)).log_prob(ybatch).sum()
+            )
+            kl = sum(m.kl() for m in self.net.modules() if isinstance(m, VILinear))
+            mfvi_loss = data_nll + kl
+            mfvi_loss.backward()
+            self.optim_vi.step()
+            
+            self.elbos_mfvi.append(-mfvi_loss.item())
+
+
+        
+    def before_train(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         random.seed(self.seed), np.random.seed(self.seed), torch.manual_seed(self.seed)
-        nlls_mfvi, accs_mfvi, times_mfvi, elbos_mfvi, grid_preds = [], [], [0], [], []
-        t_start = time.time()
+        
         self.net = set_up_model(
             architecture=self.architecture, 
             D=self.D, 
@@ -239,61 +259,67 @@ class MeanFieldVI():
             nc=self.nc, 
             mc_samples=self.mc_samples, 
             init_sd=self.init_sd, 
-        ).to(device)
+        ).to(self.device)
 
-        train_loader = DataLoader(
+        self.train_loader = DataLoader(
             self.train_dataset,
             batch_size=self.data_minibatch,
             pin_memory=True,
             shuffle=False,
         )
-        n_train = len(train_loader.dataset)
+        self.n_train = len(self.train_loader.dataset)
         
-        test_loader = DataLoader(
+        self.test_loader = DataLoader(
             self.test_dataset,
             batch_size=self.data_minibatch,
             pin_memory=True,
             shuffle=True,
         )
 
-        optim_vi = torch.optim.Adam(self.net.parameters(), self.lr0net)
-        total_iterations = self.mul_fact * self.num_epochs
-        checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
-        lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+        self.optim_vi = torch.optim.Adam(self.net.parameters(), self.lr0net)
+        self.total_iterations = self.mul_fact * self.num_epochs
         
-        for i in tqdm(range(total_iterations)):
-            xbatch, ybatch = next(iter(train_loader))
-            xbatch, ybatch = xbatch.to(device, non_blocking=True), ybatch.to(
-                device, non_blocking=True
-            )
-            optim_vi.zero_grad()
-            data_nll = -(
-                n_train
-                / xbatch.shape[0]
-                * self.distr_fn(logits=self.net(xbatch).squeeze(-1)).log_prob(ybatch).sum()
-            )
-            kl = sum(m.kl() for m in self.net.modules() if isinstance(m, VILinear))
-            mfvi_loss = data_nll + kl
-            mfvi_loss.backward()
-            optim_vi.step()
-            with torch.no_grad():
-                elbos_mfvi.append(-mfvi_loss.item())
-            if i % self.log_every == 0 or i == total_iterations -1:
-                total, test_nll, corrects = 0, 0, 0
-                for xt, yt in test_loader:
-                    xt, yt = xt.to(device, non_blocking=True), yt.to(
-                        device, non_blocking=True
-                    )
-                    with torch.no_grad():
-                        test_logits = self.net(xt).squeeze(-1).mean(0)
-                        corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
-                        total += yt.size(0)
-                        test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
-                times_mfvi.append(times_mfvi[-1] + time.time() - t_start)
-                nlls_mfvi.append((test_nll / float(total)).item())
-                accs_mfvi.append((corrects / float(total)).item())
-                print(f"predictive accuracy: {(100*accs_mfvi[-1]):.2f}%")
+        self.nlls_mfvi = []
+        self.accs_mfvi = []
+        self.times_mfvi = [0]
+        self.elbos_mfvi = []
+        self.t_start = time.time()
+        
+        # for forgetting scores
+        self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.args.device)
+        self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.args.device)
 
+
+    
+    def test(self):
+        total, test_nll, corrects = 0, 0, 0
+        for xt, yt in self.test_loader:
+            xt, yt = xt.to(self.device, non_blocking=True), yt.to(
+                self.device, non_blocking=True
+            )
+            with torch.no_grad():
+                test_logits = self.net(xt).squeeze(-1).mean(0)
+                corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
+                total += yt.size(0)
+                test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
+        self.times_mfvi.append(self.times_mfvi[-1] + time.time() - self.t_start)
+        self.nlls_mfvi.append((test_nll / float(total)).item())
+        self.accs_mfvi.append((corrects / float(total)).item())
+        print(f"predictive accuracy: {(100*self.accs_mfvi[-1]):.2f}%")
+        
+    
+    def after_epoch(self):
+        pass 
+
+    
+    def run(self):
+        self.before_train()
+        
+        for i in tqdm(range(self.total_iterations)):
+            self.train_an_epoch()
+            
+            if i % self.log_every == 0 or i == self.total_iterations -1:
+                self.test() 
 
                 
                 
@@ -519,6 +545,64 @@ class EL2NSelection(Selection):
         
         return el2n_arr
 
+
+# TODO merge EL2NSelection with UncertaintySelection
+class UncertaintySelection(Selection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, score_type='least_confidence'):
+        super().__init__(train_dataset, num_pseudo,  nc, seed)
+        allowed_scores = ['least_confidence', 'entropy']
+
+        if score_type not in allowed_scores:
+            raise ValueError(f"{score_type} not in {allowed_scores}")
+        
+        self.score_type = score_type
+
+    def select(self):
+        # make sure this is pretrained
+        score_arr = self._get_uncertainty_score()
+        top_k = torch.topk(score_arr, self.num_pseudo).indices
+        top_k_arr = top_k.detach().numpy().tolist()
+        
+        return top_k_arr
+
+    
+    def _get_uncertainty_score(self):
+        softmax_fn = torch.nn.Softmax()
+        n_train = len(self.train_dataset)
+        data_minibatch = 128
+        
+        score_arr = torch.zeros(n_train, requires_grad=False)
+        # shuffle=False is very important for this
+        score_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+        
+        with torch.no_grad():
+            for i, (data, target) in enumerate(score_dataloader):
+                output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
+                outputs_prob = softmax_fn(output)
+                if self.score_type == "least_confidence":
+                    score = self._least_confidence_score(outputs_prob)
+                else:
+                    score = self._entropy_score(outputs_prob)
+                
+                
+                score_arr[i * data_minibatch: min((i + 1) * data_minibatch, n_train)] = score
+        
+        return score_arr
+    
+    # from eqn 2 https://arxiv.org/pdf/2204.08499.pdf
+    
+    def _least_confidence_score(self, outputs_prob):
+        score = 1.0 -  outputs_prob.max(1).values
+        return score
+    
+    def _entropy_score(self, outputs_prob, target):
+        p_eps = outputs_prob + 1e-20
+        p_log_p = outputs_prob.mul(torch.log(p_eps))
+        entropy_score = p_log_p.sum(1)
+        return entropy_score
+            
+        
+        
 
 
 
