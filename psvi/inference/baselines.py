@@ -7,6 +7,7 @@
 
 
 import random
+import re
 import time
 import numpy as np
 import torch
@@ -1402,7 +1403,7 @@ def run_kmeans(
             
             if len(core_idcs) > 0: 
                 w[core_idcs] = N / len(core_idcs)
-                
+
             nlls_random.append(test_nll.item())
             accs_random.append(test_acc.item())
             idcs_random.append(len(core_idcs))
@@ -1419,10 +1420,6 @@ def run_kmeans(
         "times": times_random[1:],
         "wt_index": wt_index,
     }
-
-
-
-    
 
 
 
@@ -1537,7 +1534,8 @@ class MfviSelect:
                  distr_fn=categorical_fn, 
                  seed=0,
                  mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
-                 log_pseudodata=False
+                 log_pseudodata=False,
+                 score_method="kmeans"
 ):
         self.x = x
         self.y = y
@@ -1561,73 +1559,64 @@ class MfviSelect:
         self.seed = seed
         self.mul_fact = mul_fact
         self.log_pseudodata = log_pseudodata
+        self.score_method = score_method
     
     def select_data(self):
-        if self.dnm=="MNIST":
-            train_loader = DataLoader(
-                self.train_dataset,
-                batch_size=self.data_minibatch,
-                # pin_memory=True,
-                shuffle=True,
-            )
-            n_train = len(train_loader.dataset)
-
-            points_per_class = [self.num_pseudo // self.nc] * self.nc  # split equally among classes
-            points_per_class[-1] = self.num_pseudo - sum(points_per_class[:-1])
-            
-            ybatch = (
-                torch.tensor(
-                    [
-                        item
-                        for sublist in [[i] * ppc for i, ppc in enumerate(points_per_class)]
-                        for item in sublist
-                    ]
-                )
-                .float()
-                .to(device, non_blocking=True)
-            )
-
-            def get_x_from_label(ipc, _l):
-                indices = (
-                    torch.as_tensor(self.train_dataset.targets).clone().detach() == _l
-                ).nonzero()
-                return torch.utils.data.DataLoader(
-                    SubsetPreservingTransforms(self.train_dataset, indices=indices, dnm=self.dnm),
-                    batch_size=ipc,
-                    shuffle=True,
-                )
-
-            distilled_lst = []
-            for c in range(nc):
-                u0 = next(iter(get_x_from_label(points_per_class[c], c)))
-                distilled_lst.append(u0.to(device=device, non_blocking=True))
-            xbatch = torch.cat(distilled_lst).to(device, non_blocking=True)
-            
-            self.chosen_dataset = torch.utils.data.TensorDataset(self.xbatch, self.ybatch)
-
-        else:
-            select_method = EL2NSelection(
+        if self.score_method == "kmeans":
+            select_method = KmeansSelection(
                 train_dataset=self.train_dataset,
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed
             )
-            
-            select_method.pretrain(
-                test_dataset=self.test_dataset,
-                architecture=self.architecture,
-                D=self.D,
-                n_hidden=self.n_hidden,
-                distr_fn=self.distr_fn,
-                mc_samples=self.mc_samples,
-                init_sd=self.init_sd,
-                data_minibatch=self.data_minibatch,
-                pretrain_epochs=2,
-                lr0net=self.lr0net, 
-                log_every=10
+        elif self.score_method == "random":
+            select_method = RandomSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed
             )
-        
-            self.chosen_dataset = select_method.get_weighted_subset()
+        elif self.score_method in ["el2n", "least_confidence", "entropy", "forgetting"]:
+            select_method = ScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=self.score_method
+            )
+        elif self.score_method in [
+            "scored_kmeans_el2n", "scored_kmeans_forgetting", 
+            "scored_kmeans_entropy", "scored_kmeans_least_confidence"]:
+            m = re.search(r'scored_kmeans_(.*)', self.score_method)
+
+            scoring_method = m.group(1)
+            
+            select_method = KmeansScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=scoring_method
+            )
+        else:
+            raise ValueError(f"{self.score_method} is not implemented")
+            
+
+        select_method.pretrain(
+            test_dataset=self.test_dataset,
+            architecture=self.architecture,
+            D=self.D,
+            n_hidden=self.n_hidden,
+            distr_fn=self.distr_fn,
+            mc_samples=self.mc_samples,
+            init_sd=self.init_sd,
+            data_minibatch=self.data_minibatch,
+            pretrain_epochs=2,
+            lr0net=self.lr0net, 
+            log_every=10
+        )
+
+        self.chosen_dataset = select_method.get_weighted_subset()
 
             
 
@@ -1743,6 +1732,7 @@ def run_selection_with_mfvi(
     nc=2,
     dnm=None,
     init_sd=None,
+    mfvi_selection_method="kmeans",
     **kwargs,
 ): 
     mfvi_select = MfviSelect(
@@ -1767,7 +1757,8 @@ def run_selection_with_mfvi(
         distr_fn=categorical_fn, 
         seed=seed,
         mul_fact=mul_fact,
-        log_pseudodata=log_pseudodata
+        log_pseudodata=log_pseudodata,
+        score_method=mfvi_selection_method
     )
     
     mfvi_select.select_data()

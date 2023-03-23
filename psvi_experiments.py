@@ -277,8 +277,8 @@ parser.add_argument(
 parser.add_argument(
     "--mfvi_selection_method",
     default="kmeans",
-    choices=["kmeans", "el2n", "entropy", "least_confidence", 
-             "scored_kmeans_el2n", "scored_kmeans_forgetting", 
+    choices=["kmeans", "el2n", "entropy", "least_confidence", "forgetting",
+             "scored_kmeans_el2n", "scored_kmeans_forgetting", "scored_kmeans_entropy",
              "scored_kmeans_least_confidence", "random"],
     type=str,
     help="Method for coreset points selection using MFVI Selection on the coreset",
