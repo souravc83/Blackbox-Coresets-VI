@@ -207,7 +207,7 @@ class MeanFieldVI():
         train_dataset=None,
         test_dataset=None,
         init_sd=None,
-        forgetting_score_flag=False
+        forgetting_score_flag=False,
         **kwargs,
     ):
         self.mc_samples = mc_samples
@@ -227,7 +227,7 @@ class MeanFieldVI():
         self.test_dataset = test_dataset
         self.init_sd = init_sd
         self.mul_fact = mul_fact
-        self.forgetting_score_flag
+        self.forgetting_score_flag = forgetting_score_flag
     
     def train_an_epoch(self):
         for xbatch, ybatch in self.train_loader:
@@ -516,6 +516,21 @@ class RandomSelection(Selection):
         
         return core_idc
     
+    def pretrain(
+        self,
+        test_dataset,
+        architecture,
+        D,
+        n_hidden,
+        distr_fn,
+        mc_samples,
+        init_sd,
+        data_minibatch,
+        pretrain_epochs,
+        lr0net, 
+        log_every):
+            pass 
+    
             
 class KmeansSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False):
@@ -529,6 +544,22 @@ class KmeansSelection(Selection):
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()
         return core_idc
+    
+    def pretrain(
+        self,
+        test_dataset,
+        architecture,
+        D,
+        n_hidden,
+        distr_fn,
+        mc_samples,
+        init_sd,
+        data_minibatch,
+        pretrain_epochs,
+        lr0net, 
+        log_every):
+            pass 
+    
 
 
 class EL2NSelection(Selection):
@@ -642,8 +673,8 @@ class ScoreSelection(Selection):
                         
         return el2n_score
     
-    def _forgetting_score(self, i, minibatch):
-        return self.forgetting_events[i * data_minibatch: min((i + 1) * data_minibatch, n_train)]
+    def _forgetting_score(self, i, data_minibatch, n_train):
+        return self.pretrained_vi.forgetting_events[i * data_minibatch: min((i + 1) * data_minibatch, n_train)]
         
 
 
@@ -673,7 +704,7 @@ class KmeansScoreSelection(ScoreSelection):
                 if len(this_kmeans_dict[k]) > 0: 
                     indices = this_kmeans_dict[k]
                     score_arr_sub = self.score_arr[indices]
-                    max_score_index = torch.argmax(score_arr_sub).detach().numpy()[0]
+                    max_score_index = torch.argmax(score_arr_sub).detach().numpy()
                     core_idcs.append(indices[max_score_index])
         
         return core_idcs
