@@ -274,6 +274,17 @@ parser.add_argument(
     "--gamma", default=1., type=float, help="Decay factor of learning rate"
 )
 
+parser.add_argument(
+    "--mfvi_selection_method",
+    default="kmeans",
+    choices=["kmeans", "el2n", "entropy", "least_confidence", 
+             "scored_kmeans_el2n", "scored_kmeans_forgetting", 
+             "scored_kmeans_least_confidence", "random"],
+    type=str,
+    help="Method for coreset points selection using MFVI Selection on the coreset",
+)
+
+
 parser.set_defaults(
     diagonal=True,
     reset=False,
@@ -459,6 +470,7 @@ def experiment_driver(
                         increment_sizes=method_args.get("increment_sizes"),
                         retrain_on_coreset=method_args.get("retrain_on_coreset"),
                         learn_z=method_args["learn_z"],
+                        mfvi_selection_method=method_args["mfvi_selection_method"]
                     )
                     print("Trial completed!\n")
     return write_to_files(results, method_args["fnm"])

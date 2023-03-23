@@ -207,6 +207,7 @@ class MeanFieldVI():
         train_dataset=None,
         test_dataset=None,
         init_sd=None,
+        forgetting_score_flag=False
         **kwargs,
     ):
         self.mc_samples = mc_samples
@@ -226,6 +227,7 @@ class MeanFieldVI():
         self.test_dataset = test_dataset
         self.init_sd = init_sd
         self.mul_fact = mul_fact
+        self.forgetting_score_flag
     
     def train_an_epoch(self):
         for xbatch, ybatch in self.train_loader:
@@ -286,8 +288,8 @@ class MeanFieldVI():
         self.t_start = time.time()
         
         # for forgetting scores
-        self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.args.device)
-        self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.args.device)
+        self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.device)
+        self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.device)
 
 
     
@@ -309,7 +311,27 @@ class MeanFieldVI():
         
     
     def after_epoch(self):
-        pass 
+        # if we are not calculating forgetting scores
+        # then just return, do not do any work
+        if not self.forgetting_score_flag:
+            return 
+        
+        for i, (xbatch, ybatch) in enumerate(self.train_loader):
+            xbatch, ybatch = xbatch.to(self.device, non_blocking=True), ybatch.to(
+                self.device, non_blocking=True
+            )
+            
+            batch_ind = list(range(
+                             (i * self.data_minibatch), (min((i + 1) * self.data_minibatch, self.n_train))
+                            ))
+            
+            
+            with torch.no_grad():
+                train_logits = self.net(xbatch).squeeze(-1).mean(0)
+                curr_acc = train_logits.argmax(-1).float().eq(ybatch).float()
+                forget_ind = torch.tensor(batch_ind)[self.last_acc[batch_ind] > curr_acc]
+                self.forgetting_events[forget_ind] += 1
+                self.last_acc[batch_ind] = curr_acc
 
     
     def run(self):
@@ -317,6 +339,7 @@ class MeanFieldVI():
         
         for i in tqdm(range(self.total_iterations)):
             self.train_an_epoch()
+            self.after_epoch()
             
             if i % self.log_every == 0 or i == self.total_iterations -1:
                 self.test() 
@@ -388,11 +411,12 @@ class WeightedSubset(torch.utils.data.Subset):
 
     
 class Selection():
-    def __init__(self, train_dataset, num_pseudo,  nc, seed):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False):
         self.train_dataset = train_dataset
         self.num_pseudo = num_pseudo
         self.nc = nc
         self.seed = seed
+        self.forgetting_flag = forgetting_flag
         self.core_idc = []
         self.chosen_dataset = None
     
@@ -464,12 +488,11 @@ class Selection():
             train_dataset=self.train_dataset,
             test_dataset=test_dataset,
             init_sd=init_sd,
+            forgetting_flag=self.forgetting_flag
         )
         
         self.pretrained_vi.run()
 
-    
-    
     
 
 class RandomSelection(Selection):
@@ -495,8 +518,8 @@ class RandomSelection(Selection):
     
             
 class KmeansSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed):
-        super().__init__(train_dataset, num_pseudo,  nc, seed)
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False):
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
     
     def select(self):
         train_x = self.train_dataset.data
@@ -547,10 +570,15 @@ class EL2NSelection(Selection):
 
 
 # TODO merge EL2NSelection with UncertaintySelection
-class UncertaintySelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, score_type='least_confidence'):
-        super().__init__(train_dataset, num_pseudo,  nc, seed)
-        allowed_scores = ['least_confidence', 'entropy']
+class ScoreSelection(Selection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, 
+                 forgetting_flag=False, score_type='least_confidence'):
+        
+        if score_type == "forgetting":
+            forgetting_flag = True
+        
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
+        allowed_scores = ['least_confidence', 'entropy', "el2n", "forgetting"]
 
         if score_type not in allowed_scores:
             raise ValueError(f"{score_type} not in {allowed_scores}")
@@ -581,8 +609,12 @@ class UncertaintySelection(Selection):
                 outputs_prob = softmax_fn(output)
                 if self.score_type == "least_confidence":
                     score = self._least_confidence_score(outputs_prob)
-                else:
+                elif self.score_type == "entropy":
                     score = self._entropy_score(outputs_prob)
+                elif self.score_type == "el2n":
+                    score = self._el2n_score(outputs_prob, target)
+                elif self.score_type == "forgetting":
+                    score = self._forgetting_score(i, data_minibatch, n_train)
                 
                 
                 score_arr[i * data_minibatch: min((i + 1) * data_minibatch, n_train)] = score
@@ -590,23 +622,58 @@ class UncertaintySelection(Selection):
         return score_arr
     
     # from eqn 2 https://arxiv.org/pdf/2204.08499.pdf
-    
     def _least_confidence_score(self, outputs_prob):
         score = 1.0 -  outputs_prob.max(1).values
         return score
     
-    def _entropy_score(self, outputs_prob, target):
+    def _entropy_score(self, outputs_prob):
         p_eps = outputs_prob + 1e-20
         p_log_p = outputs_prob.mul(torch.log(p_eps))
         entropy_score = p_log_p.sum(1)
         return entropy_score
-            
-        
-        
-
-
-
     
+    def _el2n_score(self, outputs_prob, target):
+        targets_onehot = F.one_hot(target.long(), num_classes=self.nc)
+        el2n_score = torch.linalg.vector_norm(
+            x=(outputs_prob - targets_onehot),
+            ord=2,
+            dim=1
+        )
+                        
+        return el2n_score
+    
+    def _forgetting_score(self, i, minibatch):
+        return self.forgetting_events[i * data_minibatch: min((i + 1) * data_minibatch, n_train)]
         
+
+
+class KmeansScoreSelection(ScoreSelection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence"):
         
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
+
+    def select(self):
+        # make sure this is pretrained
+        self.score_arr = self._get_uncertainty_score()
+        self._run_kmeans()
         
+        return self._combine_kmeans_score()
+    
+    def _run_kmeans(self):
+        train_x = self.train_dataset.data
+        train_y = self.train_dataset.targets
+        self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
+        self.kmeans_cluster.set_num_clusters(self.num_pseudo)
+        self.kmeans_cluster.run_kmeans()
+    
+    def _combine_kmeans_score(self):
+        core_idcs = []
+        for this_kmeans_dict in self.kmeans_cluster.kmeans_dict:
+            for k in this_kmeans_dict.keys():
+                if len(this_kmeans_dict[k]) > 0: 
+                    indices = this_kmeans_dict[k]
+                    score_arr_sub = self.score_arr[indices]
+                    max_score_index = torch.argmax(score_arr_sub).detach().numpy()[0]
+                    core_idcs.append(indices[max_score_index])
+        
+        return core_idcs
