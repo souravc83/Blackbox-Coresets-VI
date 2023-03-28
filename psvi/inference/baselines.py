@@ -1535,7 +1535,8 @@ class MfviSelect:
                  seed=0,
                  mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
                  log_pseudodata=False,
-                 score_method="kmeans"
+                 score_method="kmeans",
+                 pretrain_epochs=5 
 ):
         self.x = x
         self.y = y
@@ -1560,6 +1561,7 @@ class MfviSelect:
         self.mul_fact = mul_fact
         self.log_pseudodata = log_pseudodata
         self.score_method = score_method
+        self.pretrain_epochs = pretrain_epochs
     
     def select_data(self):
         if self.score_method == "kmeans":
@@ -1611,7 +1613,7 @@ class MfviSelect:
             mc_samples=self.mc_samples,
             init_sd=self.init_sd,
             data_minibatch=self.data_minibatch,
-            pretrain_epochs=2,
+            pretrain_epochs=self.pretrain_epochs,
             lr0net=self.lr0net, 
             log_every=10
         )
@@ -1733,6 +1735,7 @@ def run_selection_with_mfvi(
     dnm=None,
     init_sd=None,
     mfvi_selection_method="kmeans",
+    pretrain_epochs=5,
     **kwargs,
 ): 
     mfvi_select = MfviSelect(
@@ -1758,7 +1761,8 @@ def run_selection_with_mfvi(
         seed=seed,
         mul_fact=mul_fact,
         log_pseudodata=log_pseudodata,
-        score_method=mfvi_selection_method
+        score_method=mfvi_selection_method,
+        pretrain_epochs=pretrain_epochs
     )
     
     mfvi_select.select_data()

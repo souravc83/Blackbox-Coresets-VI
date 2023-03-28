@@ -288,6 +288,13 @@ parser.add_argument(
     help="Method for coreset points selection using MFVI Selection on the coreset",
 )
 
+parser.add_argument(
+    "--pretrain_epochs",
+    default=5,
+    type=int,
+    help="number of epochs to pretrain a model, before running selection",
+)
+
 
 parser.set_defaults(
     diagonal=True,
@@ -474,7 +481,8 @@ def experiment_driver(
                         increment_sizes=method_args.get("increment_sizes"),
                         retrain_on_coreset=method_args.get("retrain_on_coreset"),
                         learn_z=method_args["learn_z"],
-                        mfvi_selection_method=method_args["mfvi_selection_method"]
+                        mfvi_selection_method=method_args["mfvi_selection_method"],
+                        pretrain_epochs=method_args["pretrain_epochs"]
                     )
                     print("Trial completed!\n")
     return write_to_files(results, method_args["fnm"], method_args)
