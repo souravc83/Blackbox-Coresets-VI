@@ -13,6 +13,7 @@ from collections import namedtuple
 from io import BytesIO
 import arff
 import json 
+import datetime
 
 import numpy as np
 import pandas as pd
@@ -773,3 +774,15 @@ def update_hyperparams_dict(dnm, best_tau, fnm='psvi/data/opt_regr_hyperparams.j
             opt_taus = json.load(f)
         opt_taus[dnm] = opt_taus.get(dnm, best_tau)
     '''
+
+def get_save_foldername(results_folder, data_list, method_list):
+    method_str = '_'.join(method_list)
+    dataset_str = '_'.join(data_list)
+    now = datetime.datetime.now()
+    date_time_str = now.strftime("%Y_%m_%d_%H_%M_%S")
+    json_foldername = os.path.join(
+            results_folder, f'{method_str}_{dataset_str}_{date_time_str}'
+    )
+
+    return json_foldername
+

@@ -38,7 +38,11 @@ from psvi.inference.psvi_classes import (
 )
 from psvi.inference.sparsebbvi import run_sparsevi_with_bb_elbo
 from psvi.models.logreg import *
-from psvi.experiments.experiments_utils import read_dataset, read_regression_dataset
+from psvi.experiments.experiments_utils import (
+    read_dataset, 
+    read_regression_dataset,
+    get_save_foldername
+)
 
 torch.autograd.set_detect_anomaly(True)
 
@@ -473,7 +477,7 @@ def experiment_driver(
                         mfvi_selection_method=method_args["mfvi_selection_method"]
                     )
                     print("Trial completed!\n")
-    return write_to_files(results, method_args["fnm"])
+    return write_to_files(results, method_args["fnm"], method_args)
 
 
 def regressor_experiment_driver(
@@ -564,37 +568,38 @@ def regressor_experiment_driver(
                         taus=taus,
                     )
                     print("Trial completed!\n")
-    return write_to_files(results, method_args["fnm"])
+    return write_to_files(results, method_args["fnm"], method_args)
 
 
 
 
-def write_to_files(results: Dict[str, Any], fnm: str) -> None:
+def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
     r"""
     Write results to pk files
     """
-    #res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
-    #print(f"Storing results in {res_fnm}")
-    #with open(res_fnm, "wb") as outfile:
-    #    pickle.dump(results, outfile)
-    
-    #print(results)
         
     # save as json    
     if method_args['save_new_folder']:
-        method_str = '_'.join(method_args['methods'])
-        dataset_str = '_'.join(method_args['datasets'])
-        json_foldername = os.path.join(
-            method_args['results_folder'], f'{method_str}_{dataset_str}'
+        json_foldername = get_save_foldername(
+            results_folder=method_args['results_folder'],
+            data_list=method_args['datasets'],
+            method_list=method_args['methods']
         )
+        
         if not os.path.isdir(json_foldername):
             os.mkdir(json_foldername)
         json_fname = os.path.join(json_foldername, f'{fnm}.json')
+        config_json_fname = os.path.join(json_foldername, 'config.json')
             
     else:
         json_fname = f"{method_args['results_folder']}/{fnm}.json"
+        config_json_fname = f"{method_args['results_folder']}/config.json"
+
     with open(json_fname, 'w') as fp:
         json.dump(results, fp)
+    
+    with open(config_json_fname, 'w') as config_fp:
+        json.dump(method_args, config_fp)
 
 
 
