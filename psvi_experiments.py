@@ -295,6 +295,12 @@ parser.add_argument(
     help="number of epochs to pretrain a model, before running selection",
 )
 
+parser.add_argument(
+    "--load_from_saved",
+    action=argparse.BooleanOptionalAction,
+    help="Load pretrained models for MFVI on full data, from saved",
+)
+
 
 parser.set_defaults(
     diagonal=True,
@@ -307,7 +313,8 @@ parser.set_defaults(
     log_pseudodata=False,
     retrain_on_coreset=False, 
     learn_z=False,
-    save_new_folder=False
+    save_new_folder=False,
+    load_from_saved=False
 )
 
 parsed_args = parser.parse_args()
@@ -482,7 +489,9 @@ def experiment_driver(
                         retrain_on_coreset=method_args.get("retrain_on_coreset"),
                         learn_z=method_args["learn_z"],
                         mfvi_selection_method=method_args["mfvi_selection_method"],
-                        pretrain_epochs=method_args["pretrain_epochs"]
+                        pretrain_epochs=method_args["pretrain_epochs"],
+                        data_folder=method_args["data_folder"], 
+                        load_from_saved=method_args["load_from_saved"] 
                     )
                     print("Trial completed!\n")
     return write_to_files(results, method_args["fnm"], method_args)

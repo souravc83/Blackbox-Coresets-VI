@@ -1536,7 +1536,9 @@ class MfviSelect:
                  mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
                  log_pseudodata=False,
                  score_method="kmeans",
-                 pretrain_epochs=5 
+                 pretrain_epochs=5,
+                 data_folder=None,
+                 load_from_saved=False
 ):
         self.x = x
         self.y = y
@@ -1562,6 +1564,9 @@ class MfviSelect:
         self.log_pseudodata = log_pseudodata
         self.score_method = score_method
         self.pretrain_epochs = pretrain_epochs
+        self.data_folder = data_folder
+        self.load_from_saved = load_from_saved
+        self.dnm = dnm 
     
     def select_data(self):
         if self.score_method == "kmeans":
@@ -1615,7 +1620,11 @@ class MfviSelect:
             data_minibatch=self.data_minibatch,
             pretrain_epochs=self.pretrain_epochs,
             lr0net=self.lr0net, 
-            log_every=10
+            log_every=10,
+            data_folder=self.data_folder,
+            load_from_saved=self.load_from_saved,
+            dnm=self.dnm
+            
         )
 
         self.chosen_dataset = select_method.get_weighted_subset()
@@ -1736,6 +1745,8 @@ def run_selection_with_mfvi(
     init_sd=None,
     mfvi_selection_method="kmeans",
     pretrain_epochs=5,
+    data_folder=None,
+    load_from_saved=False,
     **kwargs,
 ): 
     mfvi_select = MfviSelect(
@@ -1762,7 +1773,9 @@ def run_selection_with_mfvi(
         mul_fact=mul_fact,
         log_pseudodata=log_pseudodata,
         score_method=mfvi_selection_method,
-        pretrain_epochs=pretrain_epochs
+        pretrain_epochs=pretrain_epochs,
+        data_folder=data_folder,
+        load_from_saved=load_from_saved
     )
     
     mfvi_select.select_data()

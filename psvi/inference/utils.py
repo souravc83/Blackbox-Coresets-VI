@@ -15,6 +15,7 @@ import numpy as np
 import time
 from typing import List
 import random
+import os
 from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
 
@@ -208,6 +209,9 @@ class MeanFieldVI():
         test_dataset=None,
         init_sd=None,
         forgetting_score_flag=False,
+        data_path=None,
+        load_from_saved=False,
+        dnm=None,
         **kwargs,
     ):
         self.mc_samples = mc_samples
@@ -228,6 +232,12 @@ class MeanFieldVI():
         self.init_sd = init_sd
         self.mul_fact = mul_fact
         self.forgetting_score_flag = forgetting_score_flag
+        self.data_path = data_path
+        self.net_state_dict_fname = f'net_state_dict_{seed}.pt'
+        self.forgetting_fname = f'forgetting_{seed}.pt'
+        self.load_from_saved = load_from_saved
+        self.dnm = dnm
+        
     
     def train_an_epoch(self):
         for xbatch, ybatch in self.train_loader:
@@ -335,7 +345,14 @@ class MeanFieldVI():
 
     
     def run(self):
+        
         self.before_train()
+        
+        if self.load_from_saved:
+            load_succeeded = self.load() 
+            if load_succeeded:
+                return 
+
         
         for i in tqdm(range(self.total_iterations)):
             self.train_an_epoch()
@@ -343,6 +360,38 @@ class MeanFieldVI():
             
             if i % self.log_every == 0 or i == self.total_iterations -1:
                 self.test() 
+        self.save()
+    
+    def _get_net_fname(self):
+        net_state_dict_fname = \
+            f'net_state_dict_{self.dnm}_{self.architecture}_{self.num_epochs}_{self.seed}.pt'
+        net_full_fname = os.path.join(self.data_path, net_state_dict_fname)
+        return net_full_fname
+    
+    def _get_forgetting_fname(self):
+        forgetting_fname = \
+            f'forgetting_{self.dnm}_{self.architecture}_{self.num_epochs}_{self.seed}.pt'
+        forgetting_full_fname = os.path.join(self.data_path, forgetting_fname)
+        return forgetting_full_fname
+        
+    
+    def save(self):
+        net_full_fname = self._get_net_fname()
+        forgetting_full_fname = self._get_forgetting_fname()
+        
+        torch.save(self.net.state_dict(), net_full_fname)
+        torch.save(self.forgetting_events, forgetting_full_fname)
+    
+    def load(self):
+        net_full_fname = self._get_net_fname()
+        forgetting_full_fname = self._get_forgetting_fname()
+        if not (os.path.exists(net_full_fname) and os.path.exists(forgetting_full_fname)):
+            print(f"Net file name {net_full_fname} does not exist, running pretrain")
+            return False
+
+        self.forgetting_events = torch.load(forgetting_full_fname)
+        self.net.load_state_dict(torch.load(net_full_fname))
+        return True
 
                 
                 
@@ -398,7 +447,7 @@ class KmeansCluster():
         for this_kmeans_dict in self.kmeans_dict:
             for k in this_kmeans_dict.keys():
                 if len(this_kmeans_dict[k]) > 0: 
-                    core_idcs.append(this_kmeans_dict[k][0])
+                    core_idcs.append(random.choice(this_kmeans_dict[k]))
         
         return core_idcs
 
@@ -473,7 +522,10 @@ class Selection():
         data_minibatch,
         pretrain_epochs,
         lr0net, 
-        log_every):
+        log_every, 
+        data_folder,
+        load_from_saved,
+        dnm):
         """
         A number of models require pretraining the net.
         This uses MFVI to pretrain the net on the training dataset
@@ -496,7 +548,10 @@ class Selection():
             train_dataset=self.train_dataset,
             test_dataset=test_dataset,
             init_sd=init_sd,
-            forgetting_flag=self.forgetting_flag
+            forgetting_flag=self.forgetting_flag,
+            data_path=data_folder,
+            load_from_saved=load_from_saved,
+            dnm=dnm
         )
         
         self.pretrained_vi.run()
@@ -536,7 +591,10 @@ class RandomSelection(Selection):
         data_minibatch,
         pretrain_epochs,
         lr0net, 
-        log_every):
+        log_every,
+        data_folder,
+        load_from_saved,
+        dnm):
             pass 
     
             
@@ -565,7 +623,10 @@ class KmeansSelection(Selection):
         data_minibatch,
         pretrain_epochs,
         lr0net, 
-        log_every):
+        log_every,
+        data_folder,
+        load_from_saved,
+        dnm):
             pass 
     
 
