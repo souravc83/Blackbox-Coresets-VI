@@ -377,6 +377,11 @@ class KmeansCluster():
         for class_index in range(self.num_classes):
             indices = np.where(self.y.int().numpy() == class_index)[0]
             this_x = self.x.numpy()[indices]
+            # reshape MNIST 
+            if this_x.ndim == 3:
+                this_x = this_x.reshape(-1, this_x.shape[1] * this_x.shape[2])
+            
+            
             kmeans = KMeans(
                 n_clusters=self.pts_per_class, 
                 random_state=self.seed, n_init="auto").fit(this_x)
