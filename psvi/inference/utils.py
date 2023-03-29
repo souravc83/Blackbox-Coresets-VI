@@ -424,6 +424,9 @@ class Selection():
         self.forgetting_flag = forgetting_flag
         self.core_idc = []
         self.chosen_dataset = None
+        
+        # required for El2N score calculation 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     def select(self) -> List[int]:
         """
@@ -591,6 +594,9 @@ class EL2NSelection(Selection):
         
         with torch.no_grad():
             for i, (data, target) in enumerate(el2n_dataloader):
+                data = data.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+                
                 output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
                 outputs_prob = softmax_fn(output)
                 targets_onehot = F.one_hot(target.long(), num_classes=self.nc)
@@ -641,6 +647,9 @@ class ScoreSelection(Selection):
         
         with torch.no_grad():
             for i, (data, target) in enumerate(score_dataloader):
+                data = data.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+
                 output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
                 outputs_prob = softmax_fn(output)
                 if self.score_type == "least_confidence":
