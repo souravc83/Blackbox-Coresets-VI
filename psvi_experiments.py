@@ -65,7 +65,7 @@ parser.add_argument(
     "--datasets",
     default=["phishing"],
     nargs="+",
-    choices=["webspam", "phishing", "adult", "MNIST", "halfmoon", "four_blobs", "sinus", "concrete", "energy", "power", "kin8nm", "protein", "naval", "yacht", "boston", "wine", "year", "synth_lr_10", "synth_lr_50", "synth_lr_200"],
+    choices=["webspam", "phishing", "adult", "MNIST", "halfmoon", "four_blobs", "sinus", "concrete", "energy", "power", "kin8nm", "protein", "naval", "yacht", "boston", "wine", "year", "synth_lr_10", "synth_lr_50", "synth_lr_200", "normal_mvn"],
     type=str,
     help="List of dataset names",
 )
@@ -594,7 +594,9 @@ def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
     r"""
     Write results to pk files
     """
-        
+    
+    res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
+    
     # save as json    
     if method_args['save_new_folder']:
         json_foldername = get_save_foldername(
@@ -607,16 +609,22 @@ def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
             os.mkdir(json_foldername)
         json_fname = os.path.join(json_foldername, f'{fnm}.json')
         config_json_fname = os.path.join(json_foldername, 'config.json')
+        res_fnm = os.path.join(json_foldername, f'{fnm}.pk')
             
     else:
         json_fname = f"{method_args['results_folder']}/{fnm}.json"
         config_json_fname = f"{method_args['results_folder']}/config.json"
+        res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
+    
 
-    with open(json_fname, 'w') as fp:
-        json.dump(results, fp)
+    #with open(json_fname, 'w') as fp:
+    #    json.dump(results, fp)
     
     with open(config_json_fname, 'w') as config_fp:
         json.dump(method_args, config_fp)
+    
+    with open(res_fnm, "wb") as outfile:
+        pickle.dump(results, outfile)
 
 
 

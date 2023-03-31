@@ -460,7 +460,7 @@ class WeightedSubset(torch.utils.data.Subset):
 
     def __getitem__(self, idx):
         data, target = self.dataset[self.indices[idx]]
-        return data, target, self.weights[idx]
+        return idx, data, target, self.weights[idx]
 
 
     
@@ -494,13 +494,16 @@ class Selection():
         self.chosen_dataset = Subset(self.train_dataset, self.core_idc)
         return self.chosen_dataset 
     
-    def get_weighted_subset(self):
+    def get_weighted_subset(self, wt_vec=None):
         # initialize the weights
-        n_train = len(self.train_dataset)
-        scaling_factor = n_train / self.num_pseudo
-        wt_vec = scaling_factor * torch.ones(self.num_pseudo)
+        if not wt_vec:
+            n_train = len(self.train_dataset)
+            scaling_factor = n_train / self.num_pseudo
+            wt_vec = scaling_factor * torch.ones(self.num_pseudo)
         
-        self.core_idc = self.select()
+        # if we have not run select yet, then run select
+        if len(self.core_idc) == 0:
+            self.core_idc = self.select()
         
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
@@ -509,6 +512,9 @@ class Selection():
         )
         
         return self.chosen_dataset
+    
+        
+    
     
     def pretrain(
         self,

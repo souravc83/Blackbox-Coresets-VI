@@ -673,6 +673,30 @@ def make_synthetic(num_datapoints=1000, D=2):
     y[y==0] = -1
     return torch.from_numpy(X.astype(np.float32)), torch.from_numpy(y.astype(np.float32))
 
+def make_synthetic_normal(num_datapoints=1000):
+    np.random.seed(43)
+    mean_1 = np.array([-1,1])
+    mean_2 = np.array([1,-1])
+    cov = 8. * np.eye(2)
+    cov[0,1] = 2.5
+    cov[1,0] = 2.5
+    pts_1 = np.random.multivariate_normal(mean_1, cov, num_datapoints)
+    pts_2 = np.random.multivariate_normal(mean_2, cov, num_datapoints)
+    X = np.vstack((pts_1, pts_2))
+
+    y_1 = np.zeros(num_datapoints)
+    y_2 = np.ones(num_datapoints)
+    y = np.concatenate([y_1, y_2])
+    y[y==0] = -1
+    
+    #permute the indices randomly
+    indices = np.random.permutation(X.shape[0])
+    X = X[indices]
+    y = y[indices]
+    
+    
+    return torch.from_numpy(X.astype(np.float32)), torch.from_numpy(y.astype(np.float32))
+
 
 def read_dataset(dnm, method_args):
     r"""
@@ -715,7 +739,9 @@ def read_dataset(dnm, method_args):
             )
         elif dnm.startswith("synth_lr"):
             (X, Y), num_classes = make_synthetic(D=int(dnm.split('_')[-1]), num_datapoints=1000), 2
-        if dnm.startswith(("halfmoon", "four_blobs", "phishing", "synth_lr")):  # splite in train / test data
+        elif dnm =="normal_mvn":
+            (X, Y), num_classes = make_synthetic_normal(num_datapoints=1000), 2
+        if dnm.startswith(("halfmoon", "four_blobs", "phishing", "synth_lr", "normal_mvn")):  # splite in train / test data
             Y[Y == -1] = 0
             test_size = int(method_args["test_ratio"] * X.shape[0])
             x, y, xt, yt = (
@@ -727,7 +753,7 @@ def read_dataset(dnm, method_args):
         N, D = x.shape
         (train_dataset, test_dataset) = (
             (SynthDataset(x, y), SynthDataset(xt, yt))
-            if dnm.startswith(("halfmoon", "four_blobs", "phishing", "synth_lr", "webspam", "adult"))
+            if dnm.startswith(("halfmoon", "four_blobs", "phishing", "synth_lr", "webspam", "adult", "normal_mvn"))
             else (None, None)
         )
     else:

@@ -1538,7 +1538,8 @@ class MfviSelect:
                  score_method="kmeans",
                  pretrain_epochs=5,
                  data_folder=None,
-                 load_from_saved=False
+                 load_from_saved=False,
+                 train_weights=True
 ):
         self.x = x
         self.y = y
@@ -1567,6 +1568,20 @@ class MfviSelect:
         self.data_folder = data_folder
         self.load_from_saved = load_from_saved
         self.dnm = dnm 
+        self.train_weights = train_weights
+        
+        # calculate the weight vector
+        n_train = len(self.train_dataset)
+        sum_scaling = n_train / self.num_pseudo
+        self.wt_vec = sum_scaling * torch.ones(self.num_pseudo)
+        if self.train_weights:
+            self.train_wt_vec = sum_scaling * torch.ones(self.num_pseudo)
+            self.train_wt_vec.requires_grad_()
+        else:
+            self.train_wt_vec = self.wt_vec
+        
+        self._setup()
+        
     
     def select_data(self):
         if self.score_method == "kmeans":
@@ -1628,22 +1643,23 @@ class MfviSelect:
         )
 
         self.chosen_dataset = select_method.get_weighted_subset()
-
             
 
-    
-    def evaluate_coreset(self):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def _setup(self):
+        """
+        class to set up all the calculations.
+        """
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         random.seed(self.seed), np.random.seed(self.seed), torch.manual_seed(self.seed)
-        nlls_mfvi, accs_mfvi, times_mfvi, elbos_mfvi, grid_preds = [], [], [0], [], []
-        t_start = time.time()
-        net = set_up_model(
+        self.net = set_up_model(
             architecture=self.architecture, D=self.D, n_hidden=self.n_hidden, nc=self.nc, 
             mc_samples=self.mc_samples, init_sd=self.init_sd,
-        ).to(device)
+        ).to(self.device)
         
-
-        n_train = len(self.train_dataset)
+    
+    def _test(self):
+        nlls_mfvi, accs_mfvi = [], []
+        
         test_loader = DataLoader(
             self.test_dataset,
             batch_size=self.data_minibatch,
@@ -1651,72 +1667,93 @@ class MfviSelect:
             shuffle=True,
         )
         
-        optim_vi = torch.optim.Adam(net.parameters(), self.lr0net)
-        sum_scaling = n_train / self.num_pseudo
+        total, test_nll, corrects = 0, 0, 0
+        for xt, yt in test_loader:
+            xt, yt = xt.to(self.device, non_blocking=True), yt.to(
+                self.device, non_blocking=True
+            )
+            with torch.no_grad():
+                test_logits = self.net(xt).squeeze(-1).mean(0)
+                corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
+                total += yt.size(0)
+                test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
+        nlls_mfvi.append((test_nll / float(total)).item())
+        accs_mfvi.append((corrects / float(total)).item())
+        print(f"predictive accuracy: {(100*accs_mfvi[-1]):.2f}%")
+        return accs_mfvi, nlls_mfvi
+
+
+    def evaluate_coreset(self):        
+        elbos_mfvi = []
+        grid_preds = []
         
-        wt_vec = sum_scaling * torch.ones(self.num_pseudo)
+        optim_vi = torch.optim.Adam(self.net.parameters(), self.lr0net)   
+        optim_wt = torch.optim.Adam([self.train_wt_vec], self.lr0net)
         
-        
-        total_iterations = self.mul_fact * self.num_epochs
-        checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
-        lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
-        
-        
+        total_iterations = self.mul_fact * self.num_epochs        
         chosen_loader = torch.utils.data.DataLoader(self.chosen_dataset, batch_size=128)
         
+        n_train = len(self.train_dataset)
+        sum_scaling = n_train / self.num_pseudo
+        softmax_fn = torch.nn.Softmax()
+        
+        checkpts = list(range(self.mul_fact * self.num_epochs))[::self.log_every]
+        lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+
         
         for i in tqdm(range(total_iterations)):
-            for xbatch_, ybatch_, weights_,  in chosen_loader:
-                #self.xbatch, self.ybatch = self.xbatch.to(device), self.ybatch.to(device)
-                xbatch_ = xbatch_.to(device)
-                ybatch_ = ybatch_.to(device)
-                weights_ = weights_.to(device)
-            
-                optim_vi.zero_grad()
+            optim_vi.zero_grad()
+            for idx_, xbatch_, ybatch_, weights_,  in chosen_loader:
+                optim_wt.zero_grad()
+
+                xbatch_ = xbatch_.to(self.device)
+                ybatch_ = ybatch_.to(self.device)
+                wts = weights_.to(self.device)
+                #wts = sum_scaling * softmax_fn(self.train_wt_vec)[idx_]
+                #wts = wts.to(self.device)
+
 
                 data_nll = (
-                    - weights_.dot(
-                        self.distr_fn(logits=net(xbatch_).squeeze(-1)).log_prob(ybatch_).sum(0)
+                    - wts.dot(
+                        self.distr_fn(logits=self.net(xbatch_).squeeze(-1)).log_prob(ybatch_).sum(0)
                     )
                 )
 
-                kl = sum(m.kl() for m in net.modules() if isinstance(m, VILinear))
+                kl = sum(m.kl() for m in self.net.modules() if isinstance(m, VILinear))
                 mfvi_loss = data_nll + kl
                 mfvi_loss.backward()
+
+                optim_wt.step()
                 optim_vi.step()
+                
             
             with torch.no_grad():
                 elbos_mfvi.append(-mfvi_loss.item())
             if i % self.log_every == 0:
-                total, test_nll, corrects = 0, 0, 0
-                for xt, yt in test_loader:
-                    xt, yt = xt.to(device, non_blocking=True), yt.to(
-                        device, non_blocking=True
-                    )
-                    with torch.no_grad():
-                        test_logits = net(xt).squeeze(-1).mean(0)
-                        corrects += test_logits.argmax(-1).float().eq(yt).float().sum()
-                        total += yt.size(0)
-                        test_nll += -self.distr_fn(logits=test_logits).log_prob(yt).sum()
-                        if self.log_pseudodata and i in lpit:
-                            grid_preds.append(pred_on_grid(net, device=
-                            device).detach().cpu().numpy().T)
-                times_mfvi.append(times_mfvi[-1] + time.time() - t_start)
-                nlls_mfvi.append((test_nll / float(total)).item())
-                accs_mfvi.append((corrects / float(total)).item())
-                print(f"predictive accuracy: {(100*accs_mfvi[-1]):.2f}%")
+                accs_mfvi, nlls_mfvi = self._test()
+            if self.log_pseudodata and i in lpit:
+                grid_preds.append(pred_on_grid(self.net, device=self.device).detach().cpu().numpy().T)
+                
+        
         # store results
         results = {
             "accs": accs_mfvi,
             "nlls": nlls_mfvi,
-            "times": times_mfvi[1:],
+            "times": 0,
             "elbos": elbos_mfvi,
             "csizes": [self.num_pseudo] * (self.mul_fact * self.num_epochs),
         }
+        
         if self.log_pseudodata:
+            print("Storing pseudodata")
             results["grid_preds"] = grid_preds
-            results["us"], results["zs"], results["vs"] = self.xbatch.detach(), self.ybatch.detach(), [sum_scaling]*self.num_pseudo
+            results["us"], results["zs"], results["vs"] = xbatch_.detach(), ybatch_.detach(),[sum_scaling]*self.num_pseudo
+
+        
         return results
+    
+        
+        
 
 
 def run_selection_with_mfvi(
