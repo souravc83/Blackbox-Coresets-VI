@@ -1585,12 +1585,22 @@ class MfviSelect:
     
     def select_data(self):
         if self.score_method == "kmeans":
-            select_method = KmeansSelection(
-                train_dataset=self.train_dataset,
-                num_pseudo=self.num_pseudo,
-                nc=self.nc,
-                seed=self.seed
-            )
+            if self.architecture != "lenet":
+                select_method = KmeansSelection(
+                    train_dataset=self.train_dataset,
+                    num_pseudo=self.num_pseudo,
+                    nc=self.nc,
+                    seed=self.seed
+                )
+            else:
+                select_method = KmeansSelection(
+                    train_dataset=self.train_dataset,
+                    num_pseudo=self.num_pseudo,
+                    nc=self.nc,
+                    seed=self.seed,
+                    embedding_flag=True
+                )
+
         elif self.score_method == "random":
             select_method = RandomSelection(
                 train_dataset=self.train_dataset,
@@ -1746,10 +1756,11 @@ class MfviSelect:
         
         if self.log_pseudodata:
             print("Storing pseudodata")
-            results["grid_preds"] = grid_preds
-            results["us"], results["zs"], results["vs"] = xbatch_.detach(), ybatch_.detach(),[sum_scaling]*self.num_pseudo
+            results["grid_preds"] = grid_preds.detach().cpu().numpy().tolist()
+            results["us"] = xbatch_.detach().cpu().numpy().tolist()
+            results["zs"] = ybatch_.detach().cpu().numpy().tolist()
+            results["vs"] = [sum_scaling]*self.num_pseudo
 
-        
         return results
     
         

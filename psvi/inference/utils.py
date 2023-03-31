@@ -450,6 +450,7 @@ class KmeansCluster():
                     core_idcs.append(random.choice(this_kmeans_dict[k]))
         
         return core_idcs
+    
 
 class WeightedSubset(torch.utils.data.Subset):
     def __init__(self, dataset, indices, weights) -> None:
@@ -605,16 +606,55 @@ class RandomSelection(Selection):
     
             
 class KmeansSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False):
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
+        self.embedding_flag = embedding_flag
     
     def select(self):
-        train_x = self.train_dataset.data
+        
         train_y = self.train_dataset.targets
+        n_train = len(self.train_dataset)
+        
+        
+        if self.embedding_flag:
+            # for now this is hardcoded to lenet value
+            # later, we might need to provide this with architecture
+            embedding_size = 84
+            embeddings = torch.zeros(n_train, embedding_size, requires_grad=False).to(self.device)
+            data_minibatch = 128
+            kmeans_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+            last_layer = None
+            
+            pretrained_net = self.pretrained_vi.net 
+            pretrained_net.eval()
+            
+
+        
+            with torch.no_grad():
+                for i, (data, target) in enumerate(kmeans_dataloader):
+                    data = data.to(self.device, non_blocking=True)
+                    target = target.to(self.device, non_blocking=True)
+
+                    batch_ind = list(range(
+                        (i * data_minibatch), (min((i + 1) * data_minibatch, n_train))
+                    ))
+
+                    x = data
+                    for layer in pretrained_net:
+                        last_layer = x
+                        x = layer(x)
+
+                    embeddings[batch_ind] = last_layer.sum(0).squeeze(0)
+        
+            train_x = embeddings.detach().cpu()
+        else:
+            train_x = self.train_dataset.data
+        
         kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
         kmeans_cluster.set_num_clusters(self.num_pseudo)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()
+        
         return core_idc
     
     def pretrain(
@@ -633,7 +673,33 @@ class KmeansSelection(Selection):
         data_folder,
         load_from_saved,
         dnm):
-            pass 
+            # if we are not using embeddings and just the original data points
+            # we do not need pretraining.
+            # if we are using embeddings, we run the same pretraining procedure as 
+            # 
+            if not self.embedding_flag:
+                pass 
+            else:
+                # for now the embeddings are only for lenet
+                if architecture != 'lenet':
+                    raise ValueError("embeddings are calculated only for lenet")
+                    
+                super().pretrain(
+                    test_dataset,
+                    architecture,
+                    D,
+                    n_hidden,
+                    distr_fn,
+                    mc_samples,
+                    init_sd,
+                    data_minibatch,
+                    pretrain_epochs,
+                    lr0net, 
+                    log_every,
+                    data_folder,
+                    load_from_saved,
+                    dnm
+                )
     
 
 
