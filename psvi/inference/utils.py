@@ -914,10 +914,17 @@ class RandomIncrementalSelection(ScoreSelection):
         
     def select(self):
         score_arr = self._get_uncertainty_score()
-        top_k = torch.topk(score_arr, 1).indices
+        curr_len = len(self.current_core_idc)
+        top_k = torch.topk(score_arr, (self.num_pseudo + curr_len)).indices
+        
         top_k_arr = top_k.detach().numpy().tolist()
-        core_idc = self.current_core_idc + top_k_arr
-    
+        
+        for new_index in top_k_arr:
+            if new_index not in self.current_core_idc:
+                core_idc = self.current_core_idc + [new_index]
+               
+                break
+                
         return core_idc
     def get_weighted_subset(self, wt_vec=None):
 

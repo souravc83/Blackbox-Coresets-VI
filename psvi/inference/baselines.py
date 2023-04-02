@@ -1842,12 +1842,22 @@ class IncrementalMfviSelect(MfviSelect):
     def select_data(self):
         # select the first few points randomly
         min_pts = 20
-        init_select_method = KmeansSelection(
-            train_dataset=self.train_dataset,
-            num_pseudo=min_pts,
-            nc=self.nc,
-            seed=self.seed,
-        )
+        
+        if self.architecture != "lenet":
+            init_select_method = KmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=min_pts,
+                nc=self.nc,
+                seed=self.seed
+            )
+        else:
+            init_select_method = KmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=min_pts,
+                nc=self.nc,
+                seed=self.seed,
+                embedding_flag=True
+            )
         
         self.chosen_dataset = init_select_method.get_weighted_subset()
         core_idc = init_select_method.core_idc
