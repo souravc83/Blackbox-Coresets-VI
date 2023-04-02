@@ -617,8 +617,11 @@ def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
         res_fnm = f"{method_args['results_folder']}/{fnm}.pk"
     
 
-    with open(json_fname, 'w') as fp:
-        json.dump(results, fp)
+    # if storing pseudodata, then json save fails
+    # this is a hacky solution for now
+    if not method_args['log_pseudodata']:
+        with open(json_fname, 'w') as fp:
+            json.dump(results, fp)
     
     with open(config_json_fname, 'w') as config_fp:
         json.dump(method_args, config_fp)

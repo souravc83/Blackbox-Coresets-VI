@@ -388,9 +388,15 @@ class MeanFieldVI():
         if not (os.path.exists(net_full_fname) and os.path.exists(forgetting_full_fname)):
             print(f"Net file name {net_full_fname} does not exist, running pretrain")
             return False
+        
+        # map to device, could have been saved by GPU, but get loaded from CPU
+        if torch.cuda.is_available():
+            map_location=lambda storage, loc: storage.cuda()
+        else:
+            map_location='cpu'
 
-        self.forgetting_events = torch.load(forgetting_full_fname)
-        self.net.load_state_dict(torch.load(net_full_fname))
+        self.forgetting_events = torch.load(forgetting_full_fname,  map_location=map_location)
+        self.net.load_state_dict(torch.load(net_full_fname, map_location=map_location))
         return True
 
                 

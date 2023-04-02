@@ -1756,10 +1756,8 @@ class MfviSelect:
         
         if self.log_pseudodata:
             print("Storing pseudodata")
-            results["grid_preds"] = grid_preds.detach().cpu().numpy().tolist()
-            results["us"] = xbatch_.detach().cpu().numpy().tolist()
-            results["zs"] = ybatch_.detach().cpu().numpy().tolist()
-            results["vs"] = [sum_scaling]*self.num_pseudo
+            results["grid_preds"] = grid_preds
+            results["us"], results["zs"], results["vs"] = xbatch_.detach(), ybatch_.detach(), [sum_scaling]*self.num_pseudo
 
         return results
     
