@@ -494,8 +494,6 @@ class Selection():
         """
         get the subset of the torch dataset
         """
-        # TODO: implement weighted subset from 
-        # https://github.com/souravc83/deepcore_coresets/blob/b6438c5ce4517df31590d38ea1c480be574a534a/utils.py#L10
         
         self.core_idc = self.select()
         self.chosen_dataset = Subset(self.train_dataset, self.core_idc)
@@ -571,6 +569,8 @@ class Selection():
         )
         
         self.pretrained_vi.run()
+        
+        self.pretrained_net = self.pretrained_vi.net
 
     
 
@@ -634,7 +634,7 @@ class KmeansSelection(Selection):
             kmeans_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
             last_layer = None
             
-            pretrained_net = self.pretrained_vi.net 
+            pretrained_net = self.pretrained_net
             pretrained_net.eval()
             
 
@@ -763,7 +763,7 @@ class ScoreSelection(Selection):
                 data = data.to(self.device, non_blocking=True)
                 target = target.to(self.device, non_blocking=True)
 
-                output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
+                output = self.pretrained_net(data).squeeze(-1).mean(0)
                 outputs_prob = softmax_fn(output)
                 if self.score_type == "least_confidence":
                     score = self._least_confidence_score(outputs_prob)
@@ -900,4 +900,46 @@ class RandomScoreSelection(ScoreSelection):
             scored_core_idc = scored_core_idc + idx_c[top_k_arr].tolist()
 
         return scored_core_idc
+
+class RandomIncrementalSelection(ScoreSelection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, 
+                 forgetting_flag=False, score_type='entropy'):
+        
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
+        self.pretrained_net = None
+    
+    def update_current_state(self, current_core_idc, current_net):
+        self.pretrained_net = current_net
+        self.current_core_idc = current_core_idc
+        
+    def select(self):
+        score_arr = self._get_uncertainty_score()
+        top_k = torch.topk(score_arr, 1).indices
+        top_k_arr = top_k.detach().numpy().tolist()
+        core_idc = self.current_core_idc + top_k_arr
+    
+        return core_idc
+    def get_weighted_subset(self, wt_vec=None):
+
+        # for incremental, we keep calling select at each step
+        # so commenting this out
+        #if len(self.core_idc) == 0:
+        #    self.core_idc = self.select()
+        self.core_idc = self.select()
+        
+        # define the weights
+        if not wt_vec:
+            n_coreset = len(self.core_idc)
+            n_train = len(self.train_dataset)
+            scaling_factor = n_train / n_coreset
+            wt_vec = scaling_factor * torch.ones(n_coreset)
+        
+        
+        self.chosen_dataset = WeightedSubset(
+            dataset=self.train_dataset,
+            indices=self.core_idc,
+            weights=wt_vec
+        )
+        
+        return self.chosen_dataset
 

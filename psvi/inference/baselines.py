@@ -1574,11 +1574,11 @@ class MfviSelect:
         n_train = len(self.train_dataset)
         sum_scaling = n_train / self.num_pseudo
         self.wt_vec = sum_scaling * torch.ones(self.num_pseudo)
-        if self.train_weights:
-            self.train_wt_vec = sum_scaling * torch.ones(self.num_pseudo)
-            self.train_wt_vec.requires_grad_()
-        else:
-            self.train_wt_vec = self.wt_vec
+        #if self.train_weights:
+        #    self.train_wt_vec = sum_scaling * torch.ones(self.num_pseudo)
+        #    self.train_wt_vec.requires_grad_()
+        #else:
+        #    self.train_wt_vec = self.wt_vec
         
         self._setup()
         
@@ -1715,7 +1715,7 @@ class MfviSelect:
         grid_preds = []
         
         optim_vi = torch.optim.Adam(self.net.parameters(), self.lr0net)   
-        optim_wt = torch.optim.Adam([self.train_wt_vec], self.lr0net)
+        #optim_wt = torch.optim.Adam([self.train_wt_vec], self.lr0net)
         
         total_iterations = self.mul_fact * self.num_epochs        
         chosen_loader = torch.utils.data.DataLoader(self.chosen_dataset, batch_size=128)
@@ -1731,7 +1731,7 @@ class MfviSelect:
         for i in tqdm(range(total_iterations)):
             optim_vi.zero_grad()
             for idx_, xbatch_, ybatch_, weights_,  in chosen_loader:
-                optim_wt.zero_grad()
+                #optim_wt.zero_grad()
 
                 xbatch_ = xbatch_.to(self.device)
                 ybatch_ = ybatch_.to(self.device)
@@ -1750,7 +1750,7 @@ class MfviSelect:
                 mfvi_loss = data_nll + kl
                 mfvi_loss.backward()
 
-                optim_wt.step()
+                #optim_wt.step()
                 optim_vi.step()
                 
             
@@ -1778,8 +1778,101 @@ class MfviSelect:
 
         return results
     
+
+class IncrementalMfviSelect(MfviSelect):
+    def __init__(self, 
+                 x=None,
+                 y=None,
+                 xt=None,
+                 yt=None,
+                 dnm=None, 
+                 train_dataset=None, 
+                 test_dataset=None, 
+                 data_minibatch=128,
+                 num_pseudo=100, 
+                 nc=2, 
+                 architecture='logistic_regression', 
+                 D=None, 
+                 n_hidden=100, 
+                 mc_samples=4, 
+                 init_sd = None,
+                 lr0net=1e-3, 
+                 num_epochs=100, 
+                 log_every=10, 
+                 distr_fn=categorical_fn, 
+                 seed=0,
+                 mul_fact=2,  # multiplicative factor for total number of gradient iterations in classical vi methods
+                 log_pseudodata=False,
+                 score_method="kmeans",
+                 pretrain_epochs=5,
+                 data_folder=None,
+                 load_from_saved=False,
+                 train_weights=True
+    ):
+        super().__init__(
+                    x=x,
+                     y=y,
+                     xt=xt,
+                     yt=yt,
+                     dnm=dnm, 
+                     train_dataset=train_dataset, 
+                     test_dataset=test_dataset, 
+                     data_minibatch=data_minibatch,
+                     num_pseudo=num_pseudo, 
+                     nc=nc, 
+                     architecture=architecture, 
+                     D=D, 
+                     n_hidden=n_hidden, 
+                     mc_samples=mc_samples, 
+                     init_sd=init_sd,
+                     lr0net=lr0net, 
+                     num_epochs=num_epochs, 
+                     log_every=log_every, 
+                     distr_fn=distr_fn, 
+                     seed=seed,
+                     mul_fact=mul_fact,  
+                     log_pseudodata=log_pseudodata,
+                     score_method=score_method,
+                     pretrain_epochs=pretrain_epochs,
+                     data_folder=data_folder,
+                     load_from_saved=load_from_saved,
+                     train_weights=train_weights
+        )
+    
+    def select_data(self):
+        # select the first few points randomly
+        min_pts = 20
+        init_select_method = KmeansSelection(
+            train_dataset=self.train_dataset,
+            num_pseudo=min_pts,
+            nc=self.nc,
+            seed=self.seed,
+        )
         
+        self.chosen_dataset = init_select_method.get_weighted_subset()
+        core_idc = init_select_method.core_idc
+        self.evaluate_coreset()
+        orig_num_epochs = self.num_epochs
         
+        # now use the incremental select method
+        select_method = RandomIncrementalSelection(
+            train_dataset=self.train_dataset,
+            num_pseudo=self.num_pseudo,
+            nc=self.nc,
+            seed=self.seed,
+            forgetting_flag=False,
+            score_type='entropy'
+        )
+
+        
+        for i in range(min_pts + 1, self.num_pseudo):
+            select_method.update_current_state(current_core_idc=core_idc, current_net=self.net)
+            self.chosen_dataset = select_method.get_weighted_subset()
+            core_idc = select_method.core_idc
+            self.num_epochs = 10
+            self.evaluate_coreset()
+        
+        self.num_epochs = orig_num_epochs
 
 
 def run_selection_with_mfvi(
@@ -1812,34 +1905,65 @@ def run_selection_with_mfvi(
     load_from_saved=False,
     **kwargs,
 ): 
-    mfvi_select = MfviSelect(
-        x=x,
-        y=y,
-        xt=xt,
-        yt=yt,
-        dnm=dnm, 
-        train_dataset=train_dataset, 
-        test_dataset=test_dataset, 
-        data_minibatch=data_minibatch,
-        num_pseudo=num_pseudo, 
-        nc=nc, 
-        architecture=architecture, 
-        D=D, 
-        n_hidden=n_hidden, 
-        mc_samples=mc_samples, 
-        init_sd=init_sd,
-        lr0net=lr0net, 
-        num_epochs=num_epochs, 
-        log_every=log_every, 
-        distr_fn=categorical_fn, 
-        seed=seed,
-        mul_fact=mul_fact,
-        log_pseudodata=log_pseudodata,
-        score_method=mfvi_selection_method,
-        pretrain_epochs=pretrain_epochs,
-        data_folder=data_folder,
-        load_from_saved=load_from_saved
-    )
+    if mfvi_selection_method != "incremental":
+        mfvi_select = MfviSelect(
+            x=x,
+            y=y,
+            xt=xt,
+            yt=yt,
+            dnm=dnm, 
+            train_dataset=train_dataset, 
+            test_dataset=test_dataset, 
+            data_minibatch=data_minibatch,
+            num_pseudo=num_pseudo, 
+            nc=nc, 
+            architecture=architecture, 
+            D=D, 
+            n_hidden=n_hidden, 
+            mc_samples=mc_samples, 
+            init_sd=init_sd,
+            lr0net=lr0net, 
+            num_epochs=num_epochs, 
+            log_every=log_every, 
+            distr_fn=categorical_fn, 
+            seed=seed,
+            mul_fact=mul_fact,
+            log_pseudodata=log_pseudodata,
+            score_method=mfvi_selection_method,
+            pretrain_epochs=pretrain_epochs,
+            data_folder=data_folder,
+            load_from_saved=load_from_saved
+        )
+    else:
+        mfvi_select = IncrementalMfviSelect(
+            x=x,
+            y=y,
+            xt=xt,
+            yt=yt,
+            dnm=dnm, 
+            train_dataset=train_dataset, 
+            test_dataset=test_dataset, 
+            data_minibatch=data_minibatch,
+            num_pseudo=num_pseudo, 
+            nc=nc, 
+            architecture=architecture, 
+            D=D, 
+            n_hidden=n_hidden, 
+            mc_samples=mc_samples, 
+            init_sd=init_sd,
+            lr0net=lr0net, 
+            num_epochs=num_epochs, 
+            log_every=log_every, 
+            distr_fn=categorical_fn, 
+            seed=seed,
+            mul_fact=mul_fact,
+            log_pseudodata=log_pseudodata,
+            score_method=mfvi_selection_method,
+            pretrain_epochs=pretrain_epochs,
+            data_folder=data_folder,
+            load_from_saved=load_from_saved
+        )
+
     
     mfvi_select.select_data()
     return mfvi_select.evaluate_coreset()
