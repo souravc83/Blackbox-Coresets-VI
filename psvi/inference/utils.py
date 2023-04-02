@@ -502,20 +502,23 @@ class Selection():
         return self.chosen_dataset 
     
     def get_weighted_subset(self, wt_vec=None):
-        # initialize the weights
-        if not wt_vec:
-            n_train = len(self.train_dataset)
-            scaling_factor = n_train / self.num_pseudo
-            wt_vec = scaling_factor * torch.ones(self.num_pseudo)
-        
+
         # if we have not run select yet, then run select
         if len(self.core_idc) == 0:
             self.core_idc = self.select()
+                
+        # define the weights
+        if not wt_vec:
+            n_coreset = len(self.core_idc)
+            n_train = len(self.train_dataset)
+            scaling_factor = n_train / n_coreset
+            wt_vec = scaling_factor * torch.ones(n_coreset)
+        
         
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
             indices=self.core_idc,
-            weights = wt_vec
+            weights=wt_vec
         )
         
         return self.chosen_dataset
@@ -708,49 +711,6 @@ class KmeansSelection(Selection):
                 )
     
 
-
-class EL2NSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed):
-        super().__init__(train_dataset, num_pseudo,  nc, seed)
-
-    def select(self):
-        # make sure this is pretrained
-        el2n_arr = self._get_el2n_score()
-        top_k = torch.topk(el2n_arr, self.num_pseudo).indices
-        top_k_arr = top_k.detach().numpy().tolist()
-        
-        return top_k_arr
-
-    
-    def _get_el2n_score(self):
-        softmax_fn = torch.nn.Softmax()
-        n_train = len(self.train_dataset)
-        data_minibatch = 128
-        
-        el2n_arr = torch.zeros(n_train, requires_grad=False)
-        # shuffle=False is very important for this
-        el2n_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
-        
-        with torch.no_grad():
-            for i, (data, target) in enumerate(el2n_dataloader):
-                data = data.to(self.device, non_blocking=True)
-                target = target.to(self.device, non_blocking=True)
-                
-                output = self.pretrained_vi.net(data).squeeze(-1).mean(0)
-                outputs_prob = softmax_fn(output)
-                targets_onehot = F.one_hot(target.long(), num_classes=self.nc)
-                el2n_score = torch.linalg.vector_norm(
-                    x=(outputs_prob - targets_onehot),
-                    ord=2,
-                    dim=1
-                )
-                
-                el2n_arr[i * data_minibatch: min((i + 1) * data_minibatch, n_train)] = el2n_score
-        
-        return el2n_arr
-
-
-# TODO merge EL2NSelection with UncertaintySelection
 class ScoreSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, 
                  forgetting_flag=False, score_type='least_confidence'):
@@ -769,10 +729,24 @@ class ScoreSelection(Selection):
     def select(self):
         # make sure this is pretrained
         score_arr = self._get_uncertainty_score()
-        top_k = torch.topk(score_arr, self.num_pseudo).indices
-        top_k_arr = top_k.detach().numpy().tolist()
+        # select the top scores, for each class 
+        n_train = len(self.train_dataset)
+        pts_per_class = self.num_pseudo//self.nc
+        core_idc = []
         
-        return top_k_arr
+        pts_in_last_class = self.num_pseudo - (self.nc - 1) * pts_per_class
+        for c in range(self.nc):
+            idx_c = np.arange(n_train)[self.train_dataset.targets == c]
+            if c == (self.nc - 1):
+                num_pts = pts_in_last_class
+            else:
+                num_pts = pts_per_class
+            score_arr_sub = score_arr[idx_c]
+            top_k = torch.topk(score_arr_sub, num_pts).indices
+            top_k_arr = top_k.detach().numpy().tolist()
+            core_idc = core_idc + idx_c[top_k_arr].tolist()
+
+        return core_idc
 
     
     def _get_uncertainty_score(self):
@@ -861,3 +835,69 @@ class KmeansScoreSelection(ScoreSelection):
                     core_idcs.append(indices[max_score_index])
         
         return core_idcs
+
+
+class RandomScoreSelection(ScoreSelection):
+    """
+    mix random values with scores
+    """
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, 
+                 forgetting_flag=False, score_type='least_confidence'):
+        
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
+
+    def select(self):
+        # make sure this is pretrained
+        random_core_idc = self._make_random_selection()
+        num_scored_pts = self.num_pseudo - len(random_core_idc)
+        
+        scored_core_idc = self._make_scored_selection(num_scored_pts)
+        core_idc = random_core_idc + scored_core_idc
+        
+        return core_idc
+    
+    def _make_random_selection(self):
+        n_train = len(self.train_dataset)
+        pts_per_class = self.num_pseudo//(2 * self.nc)
+        if pts_per_class < 1:
+            pts_per_class = 1
+            
+        core_idc = []
+        
+        pts_in_last_class = self.num_pseudo//2 - (self.nc - 1) * pts_per_class
+        if pts_in_last_class < 1:
+            pts_in_last_class = 1
+            
+        for c in range(self.nc):
+            idx_c = np.arange(n_train)[self.train_dataset.targets == c]
+            if c == (self.nc - 1):
+                num_pts = pts_in_last_class
+            else:
+                num_pts = pts_per_class
+            chosen_idx = np.random.choice(idx_c, num_pts, replace=False)
+            core_idc = core_idc + chosen_idx.tolist()
+        
+        return core_idc
+    
+    def _make_scored_selection(self, num_scored_pts):
+        # make sure this is pretrained
+        score_arr = self._get_uncertainty_score()
+        # select the top scores, for each class 
+        n_train = len(self.train_dataset)
+        pts_per_class = num_scored_pts//self.nc
+        scored_core_idc = []
+        
+        pts_in_last_class = num_scored_pts - (self.nc - 1) * pts_per_class
+        for c in range(self.nc):
+            idx_c = np.arange(n_train)[self.train_dataset.targets == c]
+            if c == (self.nc - 1):
+                num_pts = pts_in_last_class
+            else:
+                num_pts = pts_per_class
+            score_arr_sub = score_arr[idx_c]
+            top_k = torch.topk(score_arr_sub, num_pts).indices
+            top_k_arr = top_k.detach().numpy().tolist()
+            scored_core_idc = scored_core_idc + idx_c[top_k_arr].tolist()
+
+        return scored_core_idc
+

@@ -1630,6 +1630,23 @@ class MfviSelect:
                 seed=self.seed,
                 score_type=scoring_method
             )
+            
+        elif self.score_method in [
+            "scored_random_el2n", "scored_random_forgetting", 
+            "scored_random_entropy", "scored_random_least_confidence"]:
+            m = re.search(r'scored_random_(.*)', self.score_method)
+
+            scoring_method = m.group(1)
+            
+            select_method = RandomScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=scoring_method
+            )
+
+
         else:
             raise ValueError(f"{self.score_method} is not implemented")
             
