@@ -1666,7 +1666,6 @@ class MfviSelect:
             data_folder=self.data_folder,
             load_from_saved=self.load_from_saved,
             dnm=self.dnm
-            
         )
 
         self.chosen_dataset = select_method.get_weighted_subset()
@@ -1858,6 +1857,23 @@ class IncrementalMfviSelect(MfviSelect):
                 seed=self.seed,
                 embedding_flag=True
             )
+        init_select_method.pretrain(
+            test_dataset=self.test_dataset,
+            architecture=self.architecture,
+            D=self.D,
+            n_hidden=self.n_hidden,
+            distr_fn=self.distr_fn,
+            mc_samples=self.mc_samples,
+            init_sd=self.init_sd,
+            data_minibatch=self.data_minibatch,
+            pretrain_epochs=self.pretrain_epochs,
+            lr0net=self.lr0net, 
+            log_every=10,
+            data_folder=self.data_folder,
+            load_from_saved=self.load_from_saved,
+            dnm=self.dnm
+        )
+
         
         self.chosen_dataset = init_select_method.get_weighted_subset()
         core_idc = init_select_method.core_idc
