@@ -806,10 +806,11 @@ class ScoreSelection(Selection):
 
 
 class KmeansScoreSelection(ScoreSelection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence"):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence", embedding_flag=False):
         
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
-
+        self.embedding_flag = embedding_flag 
+        
     def select(self):
         # make sure this is pretrained
         self.score_arr = self._get_uncertainty_score()
@@ -818,8 +819,42 @@ class KmeansScoreSelection(ScoreSelection):
         return self._combine_kmeans_score()
     
     def _run_kmeans(self):
-        train_x = self.train_dataset.data
         train_y = self.train_dataset.targets
+        n_train = len(self.train_dataset)
+        
+        if self.embedding_flag:
+            # for now this is hardcoded to lenet value
+            # later, we might need to provide this with architecture
+            embedding_size = 84
+            embeddings = torch.zeros(n_train, embedding_size, requires_grad=False).to(self.device)
+            data_minibatch = 128
+            kmeans_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+            last_layer = None
+            
+            pretrained_net = self.pretrained_net
+            pretrained_net.eval()
+            
+            with torch.no_grad():
+                for i, (data, target) in enumerate(kmeans_dataloader):
+                    data = data.to(self.device, non_blocking=True)
+                    target = target.to(self.device, non_blocking=True)
+
+                    batch_ind = list(range(
+                        (i * data_minibatch), (min((i + 1) * data_minibatch, n_train))
+                    ))
+
+                    x = data
+                    for layer in pretrained_net:
+                        last_layer = x
+                        x = layer(x)
+
+                    embeddings[batch_ind] = last_layer.sum(0).squeeze(0)
+        
+            train_x = embeddings.detach().cpu()
+        else:
+            train_x = self.train_dataset.data
+
+
         self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
         self.kmeans_cluster.set_num_clusters(self.num_pseudo)
         self.kmeans_cluster.run_kmeans()
@@ -950,3 +985,38 @@ class RandomIncrementalSelection(ScoreSelection):
         
         return self.chosen_dataset
 
+class WeightedKmeansSelection(KmeansScoreSelection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="entropy", 
+                embedding_flag=False):
+        
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type, embedding_flag)
+
+    def select(self):
+        # make sure this is pretrained
+        self._run_kmeans()
+        core_idc = self.kmeans_cluster.get_arbitrary_pts()
+        
+        return core_idc
+    
+
+    
+    def get_weighted_subset(self, wt_vec=None):
+
+        if len(self.core_idc) == 0:
+            self.core_idc = self.select()
+        
+        n_coreset = len(self.core_idc)
+        n_train = len(self.train_dataset)
+        scaling_factor = n_train / n_coreset
+            
+        score_arr = self._get_uncertainty_score()
+        wt_vec_init = score_arr[self.core_idc]
+        wt_vec = (scaling_factor/wt_vec_init.sum()) * wt_vec_init
+        
+        self.chosen_dataset = WeightedSubset(
+            dataset=self.train_dataset,
+            indices=self.core_idc,
+            weights=wt_vec
+        )
+        
+        return self.chosen_dataset

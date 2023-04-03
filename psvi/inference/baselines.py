@@ -1645,6 +1645,15 @@ class MfviSelect:
                 seed=self.seed,
                 score_type=scoring_method
             )
+        elif self.score_method in ["weighted_kmeans"]:
+            select_method = WeightedKmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type="entropy"
+            )
+
 
 
         else:
