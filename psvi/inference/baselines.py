@@ -1584,22 +1584,19 @@ class MfviSelect:
         
     
     def select_data(self):
+        if self.architecture == "lenet":
+            embedding_flag = True
+        else:
+            embedding_flag = False 
+            
         if self.score_method == "kmeans":
-            if self.architecture != "lenet":
-                select_method = KmeansSelection(
-                    train_dataset=self.train_dataset,
-                    num_pseudo=self.num_pseudo,
-                    nc=self.nc,
-                    seed=self.seed
-                )
-            else:
-                select_method = KmeansSelection(
-                    train_dataset=self.train_dataset,
-                    num_pseudo=self.num_pseudo,
-                    nc=self.nc,
-                    seed=self.seed,
-                    embedding_flag=True
-                )
+            select_method = KmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                embedding_flag=embedding_flag
+            )
 
         elif self.score_method == "random":
             select_method = RandomSelection(
@@ -1628,7 +1625,8 @@ class MfviSelect:
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed,
-                score_type=scoring_method
+                score_type=scoring_method,
+                embedding_flag=embedding_flag
             )
             
         elif self.score_method in [
@@ -1651,10 +1649,9 @@ class MfviSelect:
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed,
-                score_type="entropy"
+                score_type="entropy",
+                embedding_flag=embedding_flag
             )
-
-
 
         else:
             raise ValueError(f"{self.score_method} is not implemented")
