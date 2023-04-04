@@ -1013,6 +1013,8 @@ class WeightedKmeansSelection(KmeansScoreSelection):
         wt_vec_init = score_arr[self.core_idc]
         wt_vec = (scaling_factor/wt_vec_init.sum()) * wt_vec_init
         
+        #print(wt_vec)
+        
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
             indices=self.core_idc,
