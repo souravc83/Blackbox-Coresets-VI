@@ -801,8 +801,9 @@ def update_hyperparams_dict(dnm, best_tau, fnm='psvi/data/opt_regr_hyperparams.j
         opt_taus[dnm] = opt_taus.get(dnm, best_tau)
     '''
 
-def get_save_foldername(results_folder, data_list, method_list):
-    method_str = '_'.join(method_list)
+def get_save_foldername(results_folder, data_list, method_list, mfvi_selection_method):
+    new_method_list = [f'{x}_{mfvi_selection_method}' if x == 'mfvi_selection' else x for x in method_list] 
+    method_str = '_'.join(new_method_list)
     dataset_str = '_'.join(data_list)
     now = datetime.datetime.now()
     date_time_str = now.strftime("%Y_%m_%d_%H_%M_%S")

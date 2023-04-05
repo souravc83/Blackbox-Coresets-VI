@@ -605,7 +605,8 @@ def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
         json_foldername = get_save_foldername(
             results_folder=method_args['results_folder'],
             data_list=method_args['datasets'],
-            method_list=method_args['methods']
+            method_list=method_args['methods'],
+            mfvi_selection_method=method_args['mfvi_selection_method']
         )
         
         if not os.path.isdir(json_foldername):
