@@ -32,10 +32,10 @@ from psvi.models.neural_net import (
 )
 from psvi.robust_higher import innerloop_ctx
 from psvi.robust_higher.patch import monkeypatch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
 from functools import partial 
-from psvi.inference.utils import make_dataloader, compute_empirical_mean
+from psvi.inference.utils import make_dataloader, compute_empirical_mean, get_wt_index
 
 class SubsetPreservingTransforms(Dataset):
     r"""
@@ -113,6 +113,8 @@ class PSVI(object):
         lr0alpha=1e-3,
         retrain_on_coreset=False, # retrain variational parameters only on coreset datapoints after extracting a coreset using joint optimizer on the PSVI ELBO
         device_id=None,
+        results_folder=None,
+        mfvi_selection_method='random',
         **kwargs,
     ):
         np.random.seed(seed), torch.manual_seed(seed)
@@ -176,6 +178,9 @@ class PSVI(object):
             self.historical_coresets = []
         self.lr0alpha = lr0alpha
         self.retrain_on_coreset = retrain_on_coreset
+        
+        self.results_folder = results_folder
+        self.mfvi_selection_method = mfvi_selection_method
 
     def pseudo_subsample_init(self):
         r"""
@@ -257,9 +262,28 @@ class PSVI(object):
             )
 
     def custom_init(self):
-        raise ValueError("If you reach here, this should be implemented by a child class")
+        #raise ValueError("If you reach here, this should be implemented by a child class")
+        wt_index = get_wt_index(
+            results_folder=self.results_folder, 
+            dnm=self.dnm, 
+            mfvi_selection_method=self.mfvi_selection_method
+        )
         
-    
+        chosen_indices = [int(x) for x in wt_index.keys()]
+        
+        chosen_dataset = Subset(self.train_dataset, chosen_indices)
+        data_tensor = torch.stack([chosen_dataset.dataset[i][0] for i in range(len(chosen_dataset))])
+        target_tensor = torch.tensor([chosen_dataset.dataset[i][1] for i in range(len(chosen_dataset))])
+        
+        self.u = data_tensor.to(self.device, non_blocking=True)
+        self.z = target_tensor.to(self.device, non_blocking=True)
+        if self.learn_z:
+            self.z = torch.nn.functional.one_hot(
+                self.z.to(torch.int64),
+                num_classes=self.nc,
+            ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
+            self.z.requires_grad_(True)
+
     
     def psvi_elbo(self, xbatch, ybatch, model=None, params=None, hyperopt=False):
         r"""

@@ -180,7 +180,7 @@ parser.add_argument(
 parser.add_argument(
     "--init_at",
     default="subsample",
-    choices=["subsample", "random"],
+    choices=["subsample", "random", "custom"],
     type=str,
     help="Method for coreset points initialization",
 )
@@ -494,6 +494,7 @@ def experiment_driver(
                         mfvi_selection_method=method_args["mfvi_selection_method"],
                         pretrain_epochs=method_args["pretrain_epochs"],
                         data_folder=method_args["data_folder"], 
+                        results_folder=method_args["results_folder"],
                         load_from_saved=method_args["load_from_saved"] 
                     )
                     print("Trial completed!\n")

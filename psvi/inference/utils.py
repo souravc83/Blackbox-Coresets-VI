@@ -16,6 +16,7 @@ import time
 from typing import List
 import random
 import os
+import json 
 from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
 
@@ -181,6 +182,32 @@ def process_wt_index(log_core_idcs, log_core_wts):
             this_wt_dict[index] = float(this_wt[index])
         idc_wt_list.append(this_wt_dict)
     return idc_wt_list 
+
+
+def get_wt_index(results_folder, dnm, mfvi_selection_method):
+    #dnm = dnm.lower()
+    
+    contents = os.listdir(results_folder)
+    search_str = f'mfvi_selection_{mfvi_selection_method}_{dnm}_2023_04_05'
+    item_path = None 
+    for item in contents:
+        if search_str in item:
+            item_path = os.path.join(results_folder, item, 'results.json')
+            break
+    
+    if not item_path:
+        raise ValueError(f" Folder {search_str} does not exist")
+    
+    with open(item_path, 'r') as f:
+        this_dict = json.load(f)
+    
+    dict_1 = this_dict[dnm]['mfvi_selection']
+    coreset_size = list(dict_1.keys())[0]
+    wt_index = dict_1[coreset_size]['0']['wt_index']
+    return wt_index
+
+    
+            
             
     
 class MeanFieldVI():

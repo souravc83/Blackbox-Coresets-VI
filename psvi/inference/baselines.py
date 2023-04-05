@@ -1678,7 +1678,7 @@ class MfviSelect:
         self.chosen_dataset = select_method.get_weighted_subset()
         log_core_idcs = select_method.core_idc
         log_core_wts = select_method.wt_vec.detach().numpy().tolist()
-        self.wt_index = {k: v for k, v in zip(log_core_idcs, log_core_wts)} 
+        self.wt_index = {str(k): v for k, v in zip(log_core_idcs, log_core_wts)} 
             
 
     def _setup(self):
