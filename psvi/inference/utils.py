@@ -479,6 +479,7 @@ class Selection():
         self.seed = seed
         self.forgetting_flag = forgetting_flag
         self.core_idc = []
+        self.wt_vec = None
         self.chosen_dataset = None
         
         # required for El2N score calculation 
@@ -506,17 +507,17 @@ class Selection():
             self.core_idc = self.select()
                 
         # define the weights
-        if not wt_vec:
+        if not self.wt_vec:
             n_coreset = len(self.core_idc)
             n_train = len(self.train_dataset)
             scaling_factor = n_train / n_coreset
-            wt_vec = scaling_factor * torch.ones(n_coreset)
+            self.wt_vec = scaling_factor * torch.ones(n_coreset)
         
         
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
             indices=self.core_idc,
-            weights=wt_vec
+            weights=self.wt_vec
         )
         
         return self.chosen_dataset
@@ -970,17 +971,17 @@ class RandomIncrementalSelection(ScoreSelection):
         self.core_idc = self.select()
         
         # define the weights
-        if not wt_vec:
+        if not self.wt_vec:
             n_coreset = len(self.core_idc)
             n_train = len(self.train_dataset)
             scaling_factor = n_train / n_coreset
-            wt_vec = scaling_factor * torch.ones(n_coreset)
+            self.wt_vec = scaling_factor * torch.ones(n_coreset)
         
         
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
             indices=self.core_idc,
-            weights=wt_vec
+            weights=self.wt_vec
         )
         
         return self.chosen_dataset
@@ -1011,14 +1012,14 @@ class WeightedKmeansSelection(KmeansScoreSelection):
             
         score_arr = self._get_uncertainty_score()
         wt_vec_init = score_arr[self.core_idc]
-        wt_vec = (scaling_factor/wt_vec_init.sum()) * wt_vec_init
+        self.wt_vec = (scaling_factor/wt_vec_init.sum()) * wt_vec_init
         
         #print(wt_vec)
         
         self.chosen_dataset = WeightedSubset(
             dataset=self.train_dataset,
-            indices=self.core_idc,
-            weights=wt_vec
+            indices=self.p,
+            weights=self.wt_vec
         )
         
         return self.chosen_dataset

@@ -1015,6 +1015,7 @@ def run_mfvi_subset(
     total_iterations = mul_fact * num_epochs
     checkpts = list(range(mul_fact * num_epochs))[::log_every]
     lpit = [checkpts[idx] for idx in [0, len(checkpts) // 2, -1]]
+    
     for i in tqdm(range(total_iterations)):
         xbatch, ybatch = xbatch.to(device), ybatch.to(device)
         optim_vi.zero_grad()
@@ -1675,6 +1676,9 @@ class MfviSelect:
         )
 
         self.chosen_dataset = select_method.get_weighted_subset()
+        log_core_idcs = select_method.core_idc
+        log_core_wts = select_method.wt_vec.detach().numpy().tolist()
+        self.wt_index = {k: v for k, v in zip(log_core_idcs, log_core_wts)} 
             
 
     def _setup(self):
@@ -1774,6 +1778,7 @@ class MfviSelect:
             "times": 0,
             "elbos": elbos_mfvi,
             "csizes": [self.num_pseudo] * (self.mul_fact * self.num_epochs),
+            "wt_index": self.wt_index
         }
         
         if self.log_pseudodata:
