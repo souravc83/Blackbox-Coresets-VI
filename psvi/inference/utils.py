@@ -1050,3 +1050,146 @@ class WeightedKmeansSelection(KmeansScoreSelection):
         )
         
         return self.chosen_dataset
+
+    
+class CoresetSelect():
+    def __init__(self, 
+                 train_dataset=None, 
+                 test_dataset=None, 
+                 data_minibatch=128,
+                 num_pseudo=100, 
+                 nc=2, 
+                 architecture='logistic_regression', 
+                 D=None, 
+                 n_hidden=100, 
+                 mc_samples=4, 
+                 init_sd = None,
+                 lr0net=1e-3, 
+                 log_every=10, 
+                 distr_fn=categorical_fn, 
+                 seed=0,
+                 score_method="kmeans",
+                 pretrain_epochs=5,
+                 data_folder=None,
+                 load_from_saved=False,
+                 dnm=None
+                ):
+        self.architecture = architecture
+        self.score_method = score_method
+        self.train_dataset = train_dataset
+        self.test_dataset = test_dataset
+        self.num_pseudo = num_pseudo
+        self.seed = seed
+        self.nc = nc
+        self.D = D
+        self.n_hidden = n_hidden
+        self.distr_fn = distr_fn
+        self.mc_samples = mc_samples
+        self.init_sd = init_sd
+        self.data_minibatch = data_minibatch
+        self.pretrain_epochs = pretrain_epochs
+        self.lr0net = lr0net
+        self.data_folder = data_folder
+        
+        self.load_from_saved = load_from_saved
+        self.dnm = dnm
+        
+        
+    
+    def select_data(self):
+        if self.architecture == "lenet":
+            embedding_flag = True
+        else:
+            embedding_flag = False 
+            
+        if self.score_method == "kmeans":
+            select_method = KmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                embedding_flag=embedding_flag
+            )
+
+        elif self.score_method == "random":
+            select_method = RandomSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed
+            )
+        elif self.score_method in ["el2n", "least_confidence", "entropy", "forgetting"]:
+            select_method = ScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=self.score_method
+            )
+        elif self.score_method in [
+            "scored_kmeans_el2n", "scored_kmeans_forgetting", 
+            "scored_kmeans_entropy", "scored_kmeans_least_confidence"]:
+            m = re.search(r'scored_kmeans_(.*)', self.score_method)
+
+            scoring_method = m.group(1)
+            
+            select_method = KmeansScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=scoring_method,
+                embedding_flag=embedding_flag
+            )
+            
+        elif self.score_method in [
+            "scored_random_el2n", "scored_random_forgetting", 
+            "scored_random_entropy", "scored_random_least_confidence"]:
+            m = re.search(r'scored_random_(.*)', self.score_method)
+
+            scoring_method = m.group(1)
+            
+            select_method = RandomScoreSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type=scoring_method
+            )
+        elif self.score_method in ["weighted_kmeans"]:
+            select_method = WeightedKmeansSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                score_type="entropy",
+                embedding_flag=embedding_flag
+            )
+
+        else:
+            raise ValueError(f"{self.score_method} is not implemented")
+            
+
+        select_method.pretrain(
+            test_dataset=self.test_dataset,
+            architecture=self.architecture,
+            D=self.D,
+            n_hidden=self.n_hidden,
+            distr_fn=self.distr_fn,
+            mc_samples=self.mc_samples,
+            init_sd=self.init_sd,
+            data_minibatch=self.data_minibatch,
+            pretrain_epochs=self.pretrain_epochs,
+            lr0net=self.lr0net, 
+            log_every=10,
+            data_folder=self.data_folder,
+            load_from_saved=self.load_from_saved,
+            dnm=self.dnm
+        )
+
+        self.chosen_dataset = select_method.get_weighted_subset()
+        log_core_idcs = select_method.core_idc
+        log_core_wts = select_method.wt_vec.detach().numpy().tolist()
+        self.wt_index = {str(k): v for k, v in zip(log_core_idcs, log_core_wts)} 
+            
+

@@ -35,7 +35,7 @@ from psvi.robust_higher.patch import monkeypatch
 from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
 from functools import partial 
-from psvi.inference.utils import make_dataloader, compute_empirical_mean, get_wt_index
+from psvi.inference.utils import make_dataloader, compute_empirical_mean, CoresetSelect
 
 class SubsetPreservingTransforms(Dataset):
     r"""
@@ -113,8 +113,12 @@ class PSVI(object):
         lr0alpha=1e-3,
         retrain_on_coreset=False, # retrain variational parameters only on coreset datapoints after extracting a coreset using joint optimizer on the PSVI ELBO
         device_id=None,
+        data_folder=None,
         results_folder=None,
         mfvi_selection_method='random',
+        load_from_saved=False,
+        pretrain_epochs=5,
+        lr0net=1e-3,
         **kwargs,
     ):
         np.random.seed(seed), torch.manual_seed(seed)
@@ -179,8 +183,12 @@ class PSVI(object):
         self.lr0alpha = lr0alpha
         self.retrain_on_coreset = retrain_on_coreset
         
+        self.data_folder=data_folder
         self.results_folder = results_folder
         self.mfvi_selection_method = mfvi_selection_method
+        self.load_from_saved = load_from_saved
+        self.pretrain_epochs = pretrain_epochs
+        self.lr0net = lr0net
 
     def pseudo_subsample_init(self):
         r"""
@@ -263,11 +271,30 @@ class PSVI(object):
 
     def custom_init(self):
         #raise ValueError("If you reach here, this should be implemented by a child class")
-        wt_index = get_wt_index(
-            results_folder=self.results_folder, 
-            dnm=self.dnm, 
-            mfvi_selection_method=self.mfvi_selection_method
+        select_method = CoresetSelect(
+            train_dataset=self.train_dataset,
+            score_method=self.mfvi_selection_method,
+            test_dataset=self.test_dataset,
+            num_pseudo=self.num_pseudo,
+            architecture=self.architecture,
+            nc=self.nc,
+            D=self.D,
+            n_hidden=self.n_hidden,
+            distr_fn=self.distr_fn,
+            mc_samples=self.mc_samples,
+            init_sd=self.init_sd,
+            data_minibatch=self.data_minibatch,
+            pretrain_epochs=self.pretrain_epochs,
+            lr0net=self.lr0net, 
+            log_every=10,
+            data_folder=self.data_folder,
+            load_from_saved=self.load_from_saved,
+            dnm=self.dnm
         )
+        
+        select_method.select_data()
+
+        wt_index = select_method.wt_index
         
         chosen_indices = [int(x) for x in wt_index.keys()]
         
