@@ -624,9 +624,12 @@ def write_to_files(results: Dict[str, Any], fnm: str, method_args) -> None:
 
     # if storing pseudodata, then json save fails
     # this is a hacky solution for now
-    if not method_args['log_pseudodata']:
-        with open(json_fname, 'w') as fp:
-            json.dump(results, fp)
+    # TODO: disabling the json save for now, its too flaky
+    # we will rely on the pickle file
+    
+    #if not method_args['log_pseudodata']:
+    #    with open(json_fname, 'w') as fp:
+    #        json.dump(results, fp)
     
     with open(config_json_fname, 'w') as config_fp:
         json.dump(method_args, config_fp)
