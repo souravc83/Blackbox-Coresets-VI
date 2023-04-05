@@ -17,6 +17,7 @@ from typing import List
 import random
 import os
 import json 
+import re
 from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
 
