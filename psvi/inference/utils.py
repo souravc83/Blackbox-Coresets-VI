@@ -1111,6 +1111,14 @@ class CoresetSelect():
                 seed=self.seed,
                 embedding_flag=embedding_flag
             )
+        elif self.score_method == "kmeans_gradient":
+            select_method = KmeansGradientSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                embedding_flag=embedding_flag
+            )
 
         elif self.score_method == "random":
             select_method = RandomSelection(
@@ -1194,3 +1202,89 @@ class CoresetSelect():
         self.wt_index = {str(k): v for k, v in zip(log_core_idcs, log_core_wts)} 
             
 
+class KmeansGradientSelection(KmeansSelection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=True):
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
+        if not embedding_flag:
+            raise ValueError("Embedding flag must be true, to call kmeans_gradient")
+        self.embedding_flag = embedding_flag
+
+        
+    def select(self):
+        train_y = self.train_dataset.targets
+        n_train = len(self.train_dataset)
+
+        # for now this is hardcoded to lenet value
+        # later, we might need to provide this with architecture
+        gradients = self._get_embeddings()
+        gradients_torch = torch.from_numpy(gradients)
+        kmeans_cluster = KmeansCluster(x=gradients_torch, y=train_y, num_classes=self.nc, seed=self.seed)
+        kmeans_cluster.set_num_clusters(self.num_pseudo)
+        kmeans_cluster.run_kmeans()
+        core_idc = kmeans_cluster.get_arbitrary_pts()
+        
+        return core_idc
+
+ 
+
+    def _get_embeddings(self):
+        # for now this is hardcoded to lenet value
+        # later, we might need to provide this with architecture
+        embedding_size = 84
+        n_train = len(self.train_dataset)
+
+        self.distr_fn = categorical_fn
+
+        #embeddings = torch.zeros(n_train, embedding_size, requires_grad=False).to(self.device)
+        data_minibatch = 128
+        kmeans_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+        last_layer = None
+            
+        pretrained_net = self.pretrained_net
+        pretrained_net.eval()
+            
+        gradients = []
+        
+        for i, (data, target) in enumerate(kmeans_dataloader):
+            data = data.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True)
+
+            batch_num = target.shape[0]
+            xbatch = data
+            
+            with torch.no_grad():
+                for layer in pretrained_net:
+                    last_layer = xbatch
+                    xbatch = layer(xbatch)
+            
+                embeddings = last_layer.sum(0).squeeze(0)
+            output = pretrained_net(data)
+            output_mean = output.mean(dim=0)
+            data_nll = -(
+               self.distr_fn(logits=output_mean.squeeze(-1)).log_prob(target).sum()
+            )
+            kl = sum(m.kl() for m in pretrained_net.modules() if isinstance(m, VILinear))
+            mfvi_loss = data_nll + kl
+            
+            with torch.no_grad():
+                
+                bias_parameters_grads = torch.autograd.grad(mfvi_loss, output_mean)[0]
+                
+                weight_parameters_grads = embeddings.view(
+                    batch_num, 1, embedding_size).repeat(
+                    1, self.nc, 1) * bias_parameters_grads.view(
+                    batch_num, self.nc, 1).repeat(
+                    1, 1, embedding_size
+                )
+                
+                gradients.append(
+                    torch.cat(
+                        [bias_parameters_grads, weight_parameters_grads.flatten(1)],
+                        dim=1
+                    ).cpu().numpy()
+                )
+                
+        gradients = np.concatenate(gradients, axis=0)
+        print(f"Gradients: {gradients.shape}")
+                    
+        return gradients

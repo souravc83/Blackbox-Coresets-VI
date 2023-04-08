@@ -285,7 +285,7 @@ parser.add_argument(
              "scored_kmeans_el2n", "scored_kmeans_forgetting", "scored_kmeans_entropy",
              "scored_kmeans_least_confidence", "random", "scored_random_el2n", 
              "scored_random_forgetting", "scored_random_entropy", "scored_random_least_confidence",
-             "incremental", "weighted_kmeans"
+             "incremental", "weighted_kmeans", "kmeans_gradient"
             ],
     type=str,
     help="Method for coreset points selection using MFVI Selection on the coreset",
