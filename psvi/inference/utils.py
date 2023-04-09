@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from psvi.models.neural_net import VILinear, categorical_fn
 from torch.utils.data import DataLoader, Subset
 from sklearn.cluster import KMeans
+from sklearn import preprocessing
 from collections import defaultdict
 import numpy as np
 import time
@@ -432,11 +433,16 @@ class MeanFieldVI():
     
 class KmeansCluster():
     def __init__(self, x, y, num_classes=2, 
-                 balance=True, seed=None):
+                 balance=True,  seed=None, dist="euclidean"):
         self.x = x 
         self.y = y 
         self.balance = balance
         self.num_classes = num_classes
+        valid_dist = ["cosine", "euclidean"]
+        
+        if dist not in valid_dist:
+            raise ValueError(f"{dist} is not one ov valid dist: {valid_dist}")
+        self.dist = dist 
         
         self.kmeans_dict = []
         self.cluster_centers = []
@@ -464,6 +470,8 @@ class KmeansCluster():
             if this_x.ndim == 3:
                 this_x = this_x.reshape(-1, this_x.shape[1] * this_x.shape[2])
             
+            if self.dist == "cosine":
+                this_x = preprocessing.normalize(this_x)
             
             kmeans = KMeans(
                 n_clusters=self.pts_per_class, 
@@ -644,9 +652,10 @@ class RandomSelection(Selection):
     
             
 class KmeansSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False, dist="euclidean"):
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
         self.embedding_flag = embedding_flag
+        self.dist = dist 
     
     def select(self):
         
@@ -666,7 +675,6 @@ class KmeansSelection(Selection):
             pretrained_net = self.pretrained_net
             pretrained_net.eval()
             
-
         
             with torch.no_grad():
                 for i, (data, target) in enumerate(kmeans_dataloader):
@@ -688,7 +696,7 @@ class KmeansSelection(Selection):
         else:
             train_x = self.train_dataset.data
         
-        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
+        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
         kmeans_cluster.set_num_clusters(self.num_pseudo)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()
@@ -835,10 +843,11 @@ class ScoreSelection(Selection):
 
 
 class KmeansScoreSelection(ScoreSelection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence", embedding_flag=False):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence", embedding_flag=False, dist="euclidean"):
         
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
         self.embedding_flag = embedding_flag 
+        self.dist = dist 
         
     def select(self):
         # make sure this is pretrained
@@ -884,7 +893,7 @@ class KmeansScoreSelection(ScoreSelection):
             train_x = self.train_dataset.data
 
 
-        self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed)
+        self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
         self.kmeans_cluster.set_num_clusters(self.num_pseudo)
         self.kmeans_cluster.run_kmeans()
     
@@ -1015,10 +1024,9 @@ class RandomIncrementalSelection(ScoreSelection):
         return self.chosen_dataset
 
 class WeightedKmeansSelection(KmeansScoreSelection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="entropy", 
-                embedding_flag=False):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="entropy", embedding_flag=False, dist="euclidean"):
         
-        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type, embedding_flag)
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type, embedding_flag, dist)
 
     def select(self):
         # make sure this is pretrained
@@ -1073,7 +1081,9 @@ class CoresetSelect():
                  pretrain_epochs=5,
                  data_folder=None,
                  load_from_saved=False,
-                 dnm=None
+                 dnm=None,
+                 distance_fn="euclidean",
+                 last_layer_only=False
                 ):
         self.architecture = architecture
         self.score_method = score_method
@@ -1094,6 +1104,8 @@ class CoresetSelect():
         
         self.load_from_saved = load_from_saved
         self.dnm = dnm
+        self.distance_fn = distance_fn 
+        self.last_layer_only = last_layer_only 
         
         
     
@@ -1109,7 +1121,8 @@ class CoresetSelect():
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed,
-                embedding_flag=embedding_flag
+                embedding_flag=embedding_flag,
+                dist=self.distance_fn 
             )
         elif self.score_method == "kmeans_gradient":
             select_method = KmeansGradientSelection(
@@ -1117,7 +1130,9 @@ class CoresetSelect():
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed,
-                embedding_flag=embedding_flag
+                embedding_flag=embedding_flag,
+                dist=self.distance_fn,
+                last_layer_only=self.last_layer_only
             )
 
         elif self.score_method == "random":
@@ -1148,7 +1163,8 @@ class CoresetSelect():
                 nc=self.nc,
                 seed=self.seed,
                 score_type=scoring_method,
-                embedding_flag=embedding_flag
+                embedding_flag=embedding_flag,
+                dist=self.distance_fn
             )
             
         elif self.score_method in [
@@ -1172,7 +1188,8 @@ class CoresetSelect():
                 nc=self.nc,
                 seed=self.seed,
                 score_type="entropy",
-                embedding_flag=embedding_flag
+                embedding_flag=embedding_flag,
+                dist=self.distance_fn
             )
 
         else:
@@ -1203,11 +1220,13 @@ class CoresetSelect():
             
 
 class KmeansGradientSelection(KmeansSelection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=True):
-        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=True, dist="euclidean", last_layer_only=False):
+        super().__init__(train_dataset, num_pseudo,  nc, seed, 
+                         forgetting_flag, embedding_flag, dist)
         if not embedding_flag:
             raise ValueError("Embedding flag must be true, to call kmeans_gradient")
-        self.embedding_flag = embedding_flag
+        
+        self.last_layer_only = last_layer_only
 
         
     def select(self):
@@ -1218,7 +1237,7 @@ class KmeansGradientSelection(KmeansSelection):
         # later, we might need to provide this with architecture
         gradients = self._get_embeddings()
         gradients_torch = torch.from_numpy(gradients)
-        kmeans_cluster = KmeansCluster(x=gradients_torch, y=train_y, num_classes=self.nc, seed=self.seed)
+        kmeans_cluster = KmeansCluster(x=gradients_torch, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
         kmeans_cluster.set_num_clusters(self.num_pseudo)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()
@@ -1270,19 +1289,24 @@ class KmeansGradientSelection(KmeansSelection):
                 
                 bias_parameters_grads = torch.autograd.grad(mfvi_loss, output_mean)[0]
                 
-                weight_parameters_grads = embeddings.view(
-                    batch_num, 1, embedding_size).repeat(
-                    1, self.nc, 1) * bias_parameters_grads.view(
-                    batch_num, self.nc, 1).repeat(
-                    1, 1, embedding_size
-                )
-                
-                gradients.append(
-                    torch.cat(
-                        [bias_parameters_grads, weight_parameters_grads.flatten(1)],
-                        dim=1
-                    ).cpu().numpy()
-                )
+                # if last_layer_only is true, we consider only the last layer gradients
+                # and not the penultimate layer
+                if self.last_layer_only: 
+                    gradients.append(bias_parameters_gradscpu().numpy())
+                else:
+                    weight_parameters_grads = embeddings.view(
+                        batch_num, 1, embedding_size).repeat(
+                        1, self.nc, 1) * bias_parameters_grads.view(
+                        batch_num, self.nc, 1).repeat(
+                        1, 1, embedding_size
+                    )
+
+                    gradients.append(
+                        torch.cat(
+                            [bias_parameters_grads, weight_parameters_grads.flatten(1)],
+                            dim=1
+                        ).cpu().numpy()
+                    )
                 
         gradients = np.concatenate(gradients, axis=0)
         print(f"Gradients: {gradients.shape}")

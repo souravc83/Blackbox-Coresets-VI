@@ -1540,7 +1540,9 @@ class MfviSelect:
                  pretrain_epochs=5,
                  data_folder=None,
                  load_from_saved=False,
-                 train_weights=True
+                 train_weights=True,
+                 distance_fn="euclidean",
+                 last_layer_only=False
 ):
         self.x = x
         self.y = y
@@ -1570,6 +1572,9 @@ class MfviSelect:
         self.load_from_saved = load_from_saved
         self.dnm = dnm 
         self.train_weights = train_weights
+        self.distance_fn = distance_fn 
+        self.last_layer_only = last_layer_only 
+        
         
         # calculate the weight vector
         n_train = len(self.train_dataset)
@@ -1604,8 +1609,9 @@ class MfviSelect:
             log_every=10,
             data_folder=self.data_folder,
             load_from_saved=self.load_from_saved,
-            dnm=self.dnm
-
+            dnm=self.dnm,
+            distance_fn=self.distance_fn,
+            last_layer_only=self.last_layer_only
         )
         
         select_method.select_data()
@@ -1749,7 +1755,9 @@ class IncrementalMfviSelect(MfviSelect):
                  pretrain_epochs=5,
                  data_folder=None,
                  load_from_saved=False,
-                 train_weights=True
+                 train_weights=True,
+                 distance_fn="euclidean",
+                 last_layer_only=False 
     ):
         super().__init__(
                     x=x,
@@ -1872,6 +1880,8 @@ def run_selection_with_mfvi(
     pretrain_epochs=5,
     data_folder=None,
     load_from_saved=False,
+    distance_fn="euclidean",
+    last_layer_only=False,
     **kwargs,
 ): 
     if mfvi_selection_method != "incremental":
@@ -1901,7 +1911,9 @@ def run_selection_with_mfvi(
             score_method=mfvi_selection_method,
             pretrain_epochs=pretrain_epochs,
             data_folder=data_folder,
-            load_from_saved=load_from_saved
+            load_from_saved=load_from_saved,
+            distance_fn=distance_fn,
+            last_layer_only=last_layer_only
         )
     else:
         mfvi_select = IncrementalMfviSelect(
@@ -1930,7 +1942,9 @@ def run_selection_with_mfvi(
             score_method=mfvi_selection_method,
             pretrain_epochs=pretrain_epochs,
             data_folder=data_folder,
-            load_from_saved=load_from_saved
+            load_from_saved=load_from_saved,
+            distance_fn=distance_fn,
+            last_layer_only=last_layer_only
         )
 
     

@@ -268,12 +268,12 @@ parser.add_argument(
     help="Folder where evaluation files get stored",
 )
 
-
 parser.add_argument(
     "--learn_z",
     action=argparse.BooleanOptionalAction,
     help="Learn soft labels for distilled data",
 )
+
 parser.add_argument(
     "--gamma", default=1., type=float, help="Decay factor of learning rate"
 )
@@ -304,6 +304,22 @@ parser.add_argument(
     help="Load pretrained models for MFVI on full data, from saved",
 )
 
+parser.add_argument(
+    "--distance_fn",
+    default="euclidean",
+    type=str,
+    help="distance function for kmeans algorithm, or submodular functions",
+)
+
+parser.add_argument(
+    "--last_layer_only",
+    action=argparse.BooleanOptionalAction,
+    help="For gradient calculations for embeddings, should we consider only the output layer, or the fc layer below it?",
+)
+
+
+
+
 
 parser.set_defaults(
     diagonal=True,
@@ -317,7 +333,8 @@ parser.set_defaults(
     retrain_on_coreset=False, 
     learn_z=False,
     save_new_folder=False,
-    load_from_saved=False
+    load_from_saved=False,
+    last_layer_only=False
 )
 
 parsed_args = parser.parse_args()
@@ -495,8 +512,11 @@ def experiment_driver(
                         pretrain_epochs=method_args["pretrain_epochs"],
                         data_folder=method_args["data_folder"], 
                         results_folder=method_args["results_folder"],
-                        load_from_saved=method_args["load_from_saved"] 
+                        load_from_saved=method_args["load_from_saved"],
+                        distance_fn=method_args["distance_fn"],
+                        last_layer_only=method_args["last_layer_only"]
                     )
+                    
                     print("Trial completed!\n")
     return write_to_files(results, method_args["fnm"], method_args)
 
