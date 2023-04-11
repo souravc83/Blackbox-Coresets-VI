@@ -42,6 +42,7 @@ r"""
 dataset_normalization = dict(
     MNIST=((0.1307,), (0.3081,)),
     Cifar10=((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),
+    FashionMNIST=((0.2861,), (0.3530,)),
 )
 
 r"""
@@ -49,6 +50,7 @@ r"""
 """
 dataset_labels = dict(
     MNIST=list(range(10)),
+    FashionMNIST=list(range(10)),
     Cifar10=(
         "plane",
         "car",
@@ -63,15 +65,16 @@ dataset_labels = dict(
     ),
 )
 DatasetStats = namedtuple(
-    "DatasetStats", " ".join(["num_channels", "real_size", "num_classes"])
+    "DatasetStats", " ".join(["num_channels", "real_size", "num_classes", "num_training_data"])
 )
 
 r"""
     Dimensions of vision benchmark datasets
 """
 dataset_stats = dict(
-    MNIST=DatasetStats(1, 28, 10),
-    Cifar10=DatasetStats(3, 32, 10),
+    MNIST=DatasetStats(1, 28, 10, 60000),
+    FashionMNIST=DatasetStats(1, 28, 10, 60000),
+    Cifar10=DatasetStats(3, 32, 10, 50000),
 )
 
 
@@ -421,7 +424,7 @@ def get_torchvision_info(name):
     Returns statistical information for specified torchvision benchmark dataset
     """
     assert name in dataset_stats, "Unsupported dataset: {}".format(name)
-    num_channels, input_size, num_classes = dataset_stats[name]
+    num_channels, input_size, num_classes, num_training_data = dataset_stats[name]
     normalization = dataset_normalization[name]
     labels = dataset_labels[name]
     return num_channels, input_size, num_classes, normalization, labels
@@ -698,12 +701,61 @@ def make_synthetic_normal(num_datapoints=1000):
     return torch.from_numpy(X.astype(np.float32)), torch.from_numpy(y.astype(np.float32))
 
 
+def read_torchvision_datasets(dnm, data_folder, transform_list):
+    torchvision_datasets = ["MNIST", "FashionMNIST", "Cifar10"]
+    
+    if dnm == "MNIST":
+        train_dataset = torchvision.datasets.MNIST(
+            root=data_folder,
+            download=True,
+            train=True,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+        test_dataset = torchvision.datasets.MNIST(
+            root=data_folder,
+            download=True,
+            train=False,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+    elif dnm == "FashionMNIST":
+        train_dataset = torchvision.datasets.FashionMNIST(
+            root=data_folder,
+            download=True,
+            train=True,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+        test_dataset = torchvision.datasets.FashionMNIST(
+            root=data_folder,
+            download=True,
+            train=False,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+    else:
+        train_dataset = torchvision.datasets.CIFAR10(
+            root=data_folder,
+            download=True,
+            train=True,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+        
+        test_dataset = torchvision.datasets.CIFAR10(
+            root=data_folder,
+            download=True,
+            train=False,
+            transform=torchvision.transforms.Compose(transform_list),
+        )
+    
+    return train_dataset, test_dataset
+
+
+
 def read_dataset(dnm, method_args):
     r"""
     Returns one of the supported benchmark or synthetic dataset for the experiments in logistic regression, classification or regression via Bayesian nns
     """
     # TBC: check if inference methods are compatible with the dataset and raise exceptions accordingly
-    if dnm != "MNIST":  # UCI or synthetic datasets
+    torchvision_datasets = ["MNIST", "FashionMNIST", "Cifar10"]
+    if dnm not in torchvision_datasets:  # UCI or synthetic datasets
         if dnm == "halfmoon":
             # Generate HalfMoon data
             (X, Y), num_classes = (
@@ -759,7 +811,7 @@ def read_dataset(dnm, method_args):
     else:
         _, input_size, num_classes, normalization, _ = get_torchvision_info(dnm)
         real_size = dataset_stats[dnm].real_size
-        N, D = 60000, input_size
+        N, D = dataset_stats[dnm].num_training_data, input_size
         if input_size != real_size:
             transform_list = [
                 torchvision.transforms.Resize([input_size, input_size], Image.BICUBIC)
@@ -771,17 +823,12 @@ def read_dataset(dnm, method_args):
             torchvision.transforms.Normalize(*normalization),
         ]
         with suppress_stdout():
-            train_dataset, test_dataset = torchvision.datasets.MNIST(
-                root=method_args["data_folder"],
-                download=True,
-                train=True,
-                transform=torchvision.transforms.Compose(transform_list),
-            ), torchvision.datasets.MNIST(
-                root=method_args["data_folder"],
-                download=True,
-                train=False,
-                transform=torchvision.transforms.Compose(transform_list),
+            train_dataset, test_dataset = read_torchvision_datasets(
+                dnm=dnm, 
+                data_folder=method_args["data_folder"], 
+                transform_list=transform_list
             )
+            
         x, y, xt, yt = None, None, None, None
         
     return x, y, xt, yt, N, D, train_dataset, test_dataset, num_classes

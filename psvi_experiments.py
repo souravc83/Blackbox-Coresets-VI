@@ -65,7 +65,7 @@ parser.add_argument(
     "--datasets",
     default=["phishing"],
     nargs="+",
-    choices=["webspam", "phishing", "adult", "MNIST", "halfmoon", "four_blobs", "sinus", "concrete", "energy", "power", "kin8nm", "protein", "naval", "yacht", "boston", "wine", "year", "synth_lr_10", "synth_lr_50", "synth_lr_200", "normal_mvn"],
+    choices=["webspam", "phishing", "adult", "MNIST", "halfmoon", "four_blobs", "sinus", "concrete", "energy", "power", "kin8nm", "protein", "naval", "yacht", "boston", "wine", "year", "synth_lr_10", "synth_lr_50", "synth_lr_200", "normal_mvn", "FashionMNIST", "Cifar10"],
     type=str,
     help="List of dataset names",
 )
