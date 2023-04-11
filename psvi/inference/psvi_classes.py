@@ -53,11 +53,11 @@ class SubsetPreservingTransforms(Dataset):
         self.dim = dim
 
     def __getitem__(self, idx):
-        if self.dnm not in {"MNIST", "Cifar10"}:
+        if self.dnm not in {"MNIST", "FashionMNIST", "Cifar10"}:
             return self.dataset.data[self.indices[idx]].reshape((self.dim,))
         im = (
             Image.fromarray(self.dataset.data[self.indices[idx]])  # Cifar10
-            if not self.dnm == "MNIST"
+            if not self.dnm in ("MNIST", "FashionMNIST")
             else Image.fromarray(
                 np.reshape(self.dataset.data[self.indices[idx]].numpy(), (28, 28)),
                 mode="L",  # MNIST
