@@ -1352,7 +1352,10 @@ class SubmodularSelection(KmeansGradientSelection):
             
             sel_gradients = gradients[idx_c, :]
             
-            matrix = -1. * euclidean_dist_pair_np(sel_gradients)
+            if self.dist == "euclidean": 
+                matrix = -1. * euclidean_dist_pair_np(sel_gradients)
+            else:
+                matrix = -1. * cossim_pair_np(sel_gradients)
             #matrix = -1. * cossim_pair_np(sel_gradients)
             
             matrix -= np.min(matrix) - 1e-3
