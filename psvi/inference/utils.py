@@ -1138,6 +1138,16 @@ class CoresetSelect():
                 dist=self.distance_fn,
                 last_layer_only=self.last_layer_only
             )
+        elif self.score_method == "submodular":
+            select_method = SubmodularSelection(
+                train_dataset=self.train_dataset,
+                num_pseudo=self.num_pseudo,
+                nc=self.nc,
+                seed=self.seed,
+                embedding_flag=embedding_flag,
+                dist=self.distance_fn,
+                last_layer_only=self.last_layer_only
+            )
 
         elif self.score_method == "random":
             select_method = RandomSelection(
@@ -1346,7 +1356,7 @@ class SubmodularSelection(KmeansGradientSelection):
             #matrix = -1. * cossim_pair_np(sel_gradients)
             
             matrix -= np.min(matrix) - 1e-3
-            submod_function = FacilityLocation(index=class_index, similarity_matrix=matrix)
+            submod_function = FacilityLocation(index=idx_c, similarity_matrix=matrix)
             submod_optimizer = submodular_optimizer.__dict__[self._greedy](
                 args=None, 
                 index=idx_c,
@@ -1358,6 +1368,7 @@ class SubmodularSelection(KmeansGradientSelection):
             )
                 
             #chosen_idx = np.random.choice(idx_c, num_pts, replace=False)
-            core_idc = core_idc + class_result
+            print(class_result)
+            core_idc = core_idc + class_result.tolist()
         
         return core_idc

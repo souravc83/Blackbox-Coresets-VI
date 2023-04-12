@@ -7,6 +7,7 @@ class optimizer(object):
     def __init__(self, args, index, budget:int, already_selected=[]):
         self.args = args
         self.index = index
+        self.print_freq = 20
 
         if budget <= 0 or budget > index.__len__():
             raise ValueError("Illegal budget for optimizer.")
@@ -29,7 +30,7 @@ class NaiveGreedy(optimizer):
 
         greedy_gain = np.zeros(len(self.index))
         for i in range(sum(selected), self.budget):
-            if i % self.args.print_freq == 0:
+            if i % self.print_freq == 0:
                 print("| Selecting [%3d/%3d]" % (i + 1, self.budget))
             greedy_gain[~selected] = gain_function(~selected, selected, **kwargs)
             current_selection = greedy_gain.argmax()
@@ -56,7 +57,7 @@ class LazyGreedy(optimizer):
         greedy_gain[selected] = -np.inf
 
         for i in range(sum(selected), self.budget):
-            if i % self.args.print_freq == 0:
+            if i % self.print_freq == 0:
                 print("| Selecting [%3d/%3d]" % (i + 1, self.budget))
             best_gain = -np.inf
             last_max_element = -1
@@ -95,7 +96,7 @@ class StochasticGreedy(optimizer):
         greedy_gain = np.zeros(len(self.index))
         all_idx = np.arange(self.n)
         for i in range(sum(selected), self.budget):
-            if i % self.args.print_freq == 0:
+            if i % self.print_freq == 0:
                 print("| Selecting [%3d/%3d]" % (i + 1, self.budget))
 
             # Uniformly select a subset from unselected samples with size sample_size
@@ -130,7 +131,7 @@ class ApproximateLazyGreedy(optimizer):
         greedy_gain[selected] = -np.inf
 
         for i in range(sum(selected), self.budget):
-            if i % self.args.print_freq == 0:
+            if i % self.print_freq == 0:
                 print("| Selecting [%3d/%3d]" % (i + 1, self.budget))
             while True:
                 cur_max_element = greedy_gain.argmax()
