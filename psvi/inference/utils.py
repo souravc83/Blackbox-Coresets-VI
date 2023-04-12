@@ -8,6 +8,10 @@ import torch
 import torch.distributions as dist
 import torch.nn.functional as F
 from psvi.models.neural_net import VILinear, categorical_fn
+from psvi.submodular import FacilityLocation, submodular_optimizer
+from psvi.submodular.euclidean import euclidean_dist_pair_np
+from psvi.submodular.cossim import cossim_pair_np
+
 from torch.utils.data import DataLoader, Subset
 from sklearn.cluster import KMeans
 from sklearn import preprocessing
@@ -1312,3 +1316,48 @@ class KmeansGradientSelection(KmeansSelection):
         print(f"Gradients: {gradients.shape}")
                     
         return gradients
+
+class SubmodularSelection(KmeansGradientSelection):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=True, dist="euclidean", last_layer_only=False):
+        super().__init__(train_dataset, num_pseudo,  nc, seed, 
+                         forgetting_flag, embedding_flag, dist, last_layer_only)
+
+
+    def select(self):
+        n_train = len(self.train_dataset)
+        pts_per_class = self.num_pseudo//self.nc
+        core_idc = []
+        
+        pts_in_last_class = self.num_pseudo - (self.nc - 1) * pts_per_class
+        
+        self._greedy = "LazyGreedy"
+        gradients = self._get_embeddings()
+        
+        for c in range(self.nc):
+            idx_c = np.arange(n_train)[self.train_dataset.targets == c]
+            if c == (self.nc - 1):
+                num_pts = pts_in_last_class
+            else:
+                num_pts = pts_per_class
+            
+            sel_gradients = gradients[idx_c, :]
+            
+            matrix = -1. * euclidean_dist_pair_np(sel_gradients)
+            #matrix = -1. * cossim_pair_np(sel_gradients)
+            
+            matrix -= np.min(matrix) - 1e-3
+            submod_function = FacilityLocation(index=class_index, similarity_matrix=matrix)
+            submod_optimizer = submodular_optimizer.__dict__[self._greedy](
+                args=None, 
+                index=idx_c,
+                budget=num_pts
+            )
+            class_result = submod_optimizer.select(
+                gain_function=submod_function.calc_gain,
+                update_state=submod_function.update_state
+            )
+                
+            #chosen_idx = np.random.choice(idx_c, num_pts, replace=False)
+            core_idc = core_idc + class_result
+        
+        return core_idc
