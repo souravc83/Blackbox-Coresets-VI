@@ -218,6 +218,8 @@ class PSVI(object):
                 .float()
                 .to(self.device, non_blocking=True)
             )
+            print(self.z) 
+            
             if self.learn_z:
                 self.z = torch.nn.functional.one_hot(
                     self.z.to(torch.int64),
@@ -300,7 +302,20 @@ class PSVI(object):
         print(f"Chosen indices: {chosen_indices}")
         
         chosen_dataset = Subset(self.train_dataset, chosen_indices)
-        data_tensor = torch.stack([chosen_dataset[i][0] for i in range(len(chosen_dataset))])
+        
+        transform_loader = torch.utils.data.DataLoader(
+            SubsetPreservingTransforms(
+                self.train_dataset,
+                indices=chosen_indices,
+                dnm=self.dnm,
+                dim=self.D,
+            ),
+            batch_size=self.num_pseudo,
+            shuffle=False,
+        )
+        
+        
+        data_tensor = next(iter(transform_loader))
         target_tensor = torch.tensor([chosen_dataset[i][1] for i in range(len(chosen_dataset))])
         
         print(target_tensor)
@@ -1581,6 +1596,10 @@ class PSVIAFixedU(PSVILearnV):
         self.optim_alpha.zero_grad()
         if self.learn_v:
             self.optim_v.zero_grad()
+        
+        if self.learn_z:
+            self.optim_z.zero_grad()
+            
         self.u.requires_grad_(False)
 
         with innerloop_ctx(self.model, self.optim_net) as (fmodel, diffopt):
@@ -1598,6 +1617,10 @@ class PSVIAFixedU(PSVILearnV):
         if self.learn_v:
             self.optim_v.step()
             self.optim_alpha.step()
+            
+        if self.learn_z:
+            self.optim_z.step()
+            
         if self.scheduler_optim_net:
             self.scheduler_optim_net.step()
         nn.utils.vector_to_parameters(

@@ -460,9 +460,15 @@ class KmeansCluster():
         self.pts_per_class = int(np.floor(num_clusters / self.num_classes))
         if self.pts_per_class < 2:
             self.pts_per_class = 2
-        
     
     def run_kmeans(self):
+        if self.balance:
+            self.run_kmeans_balanced()
+        else:
+            self.run_kmeans_unbalanced()
+        
+    
+    def run_kmeans_balanced(self):
         # reset
         self.kmeans_dict = []
         self.cluster_centers = []
@@ -486,7 +492,30 @@ class KmeansCluster():
             
             self.kmeans_dict.append(this_kmeans_dict)
             self.cluster_centers.append(kmeans.cluster_centers_)
-                
+            
+    def run_kmeans_unbalanced(self):
+        self.kmeans_dict = []
+        self.cluster_centers = []
+        this_x = self.x.numpy()
+        # reshape MNIST 
+        if this_x.ndim == 3:
+            this_x = this_x.reshape(-1, this_x.shape[1] * this_x.shape[2])
+
+        if self.dist == "cosine":
+            this_x = preprocessing.normalize(this_x)
+        
+        kmeans = KMeans(
+            n_clusters=self.num_clusters , 
+            random_state=self.seed, n_init="auto").fit(this_x)
+        
+        
+        this_kmeans_dict = defaultdict(list)
+        for counter, label in enumerate(kmeans.labels_):
+            this_kmeans_dict[label].append(counter)
+        
+        self.kmeans_dict.append(this_kmeans_dict)
+        self.cluster_centers.append(kmeans.cluster_centers_)        
+
                 
     def get_arbitrary_pts(self):
         core_idcs = []
@@ -545,6 +574,9 @@ class Selection():
         # if we have not run select yet, then run select
         if len(self.core_idc) == 0:
             self.core_idc = self.select()
+            self.core_idc = list(
+                np.random.permutation(self.core_idc)
+            )
                 
         # define the weights
         if not self.wt_vec:
@@ -1306,7 +1338,7 @@ class KmeansGradientSelection(KmeansSelection):
                 # if last_layer_only is true, we consider only the last layer gradients
                 # and not the penultimate layer
                 if self.last_layer_only: 
-                    gradients.append(bias_parameters_gradscpu().numpy())
+                    gradients.append(bias_parameters_grads.cpu().numpy())
                 else:
                     weight_parameters_grads = embeddings.view(
                         batch_num, 1, embedding_size).repeat(
