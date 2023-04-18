@@ -1371,7 +1371,7 @@ class SubmodularSelection(KmeansGradientSelection):
             )
                 
             #chosen_idx = np.random.choice(idx_c, num_pts, replace=False)
-            #print(class_result)
+            print(class_result)
             core_idc = core_idc + class_result.tolist()
         
         return core_idc

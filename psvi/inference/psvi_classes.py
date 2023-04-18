@@ -297,10 +297,13 @@ class PSVI(object):
         wt_index = select_method.wt_index
         
         chosen_indices = [int(x) for x in wt_index.keys()]
+        print(f"Chosen indices: {chosen_indices}")
         
         chosen_dataset = Subset(self.train_dataset, chosen_indices)
-        data_tensor = torch.stack([chosen_dataset.dataset[i][0] for i in range(len(chosen_dataset))])
-        target_tensor = torch.tensor([chosen_dataset.dataset[i][1] for i in range(len(chosen_dataset))])
+        data_tensor = torch.stack([chosen_dataset[i][0] for i in range(len(chosen_dataset))])
+        target_tensor = torch.tensor([chosen_dataset[i][1] for i in range(len(chosen_dataset))])
+        
+        print(target_tensor)
         
         self.u = data_tensor.to(self.device, non_blocking=True)
         self.z = target_tensor.to(self.device, non_blocking=True)
