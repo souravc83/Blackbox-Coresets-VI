@@ -781,7 +781,7 @@ class PSVI(object):
                 if (
                     self.log_pseudodata
                     and it in lpit
-                    and self.dnm not in {"MNIST", "Cifar10", "adult", "phishing", "webspam"}
+                    and self.dnm not in {"MNIST", "FashionMNIST", "Cifar10", "adult", "phishing", "webspam"}
                 ):
                     print(f"\nlogging predictive grid at {it}")
                     grid_preds.append(self.pred_on_grid().detach().cpu().numpy().T)
@@ -1628,6 +1628,47 @@ class PSVIAFixedU(PSVILearnV):
             self.model.parameters(),
         )
         return psvi_loss
+    
+class PSVIEvaluate(PSVI):
+    r"""
+    PSVI 
+        - with learnable net only, and not other stuff
+    """
+
+    def __init__(self, learn_v=False, parameterised=False, **kwargs):
+        super().__init__(**kwargs)
+        self.learn_v = False
+        self.learn_z = False 
+
+        
+    def nested_step(self, xbatch, ybatch):
+        self.u.requires_grad_(False)
+        self.z.requires_grad_(False)
+        self.v.requires_grad_(False)
+        
+        self.optim_net.zero_grad()
+        
+        with innerloop_ctx(self.model, self.optim_net) as (fmodel, diffopt):
+            for in_it in range(self.inner_it):
+                mfvi_loss = self.inner_elbo(model=fmodel)
+                with torch.no_grad():
+                    if self.register_elbos and in_it % self.log_every == 0:
+                        self.elbos.append((1, -mfvi_loss.item()))
+                diffopt.step(mfvi_loss)
+            psvi_loss = self.psvi_elbo(xbatch, ybatch, model=fmodel)
+            with torch.no_grad():
+                if self.register_elbos:
+                    self.elbos.append((0, -psvi_loss.item()))
+            psvi_loss.backward()
+        if self.scheduler_optim_net:
+            self.scheduler_optim_net.step()
+        nn.utils.vector_to_parameters(
+            nn.utils.parameters_to_vector(list(fmodel.parameters())),
+            self.model.parameters(),
+        )
+        return psvi_loss
+
+
 
 
 ## PSVI subclass supporting regression 

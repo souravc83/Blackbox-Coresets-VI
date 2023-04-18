@@ -28,6 +28,7 @@ from psvi.inference.psvi_classes import (
     PSVIAV,
     PSVIFixedU,
     PSVILearnV,
+    PSVIEvaluate,
     PSVI_Ablated,
     PSVI_No_IW,
     PSVI_No_Rescaling,
@@ -384,6 +385,11 @@ inf_dict = {
     ),
     "psvi_alpha_fixed_u": (
         lambda *args, **kwargs: PSVIAFixedU(*args, **kwargs).run_psvi(
+            *args, **kwargs
+        )
+    ),
+    "psvi_evaluate": (
+        lambda *args, **kwargs: PSVIEvaluate(*args, **kwargs).run_psvi(
             *args, **kwargs
         )
     ),
