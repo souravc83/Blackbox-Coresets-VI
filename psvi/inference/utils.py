@@ -25,6 +25,7 @@ import json
 import re
 from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
+import faiss
 
 
 
@@ -526,6 +527,71 @@ class KmeansCluster():
         
         return core_idcs
     
+    
+    
+class KmeansFaiss(KmeansCluster):
+    def __init__(self, x, y, num_classes=2, 
+                 balance=True,  seed=None, dist="euclidean"):
+        
+        super().__init__(x,y,num_classes, balance, seed, dist)
+    
+    def run_kmeans_balanced(self):
+        self.kmeans_dict = []
+        self.cluster_centers = []
+        
+        for class_index in range(self.num_classes):
+            indices = np.where(self.y.int().numpy() == class_index)[0]
+            this_x = self.x.numpy()[indices]
+            # reshape MNIST 
+            if this_x.ndim == 3:
+                this_x = this_x.reshape(-1, this_x.shape[1] * this_x.shape[2])
+            
+            if self.dist == "cosine":
+                this_x = preprocessing.normalize(this_x)
+            data_dim = this_x.shape[1]
+            kmeans = faiss.Kmeans(
+                data_dim, self.pts_per_class, niter=20, verbose=False, gpu=False
+            )
+            kmeans.train(this_x)
+            this_index = faiss.IndexFlatL2 (data_dim)
+            this_index.add(this_x)
+            
+            D, I = this_index.search (kmeans.centroids, 1)  
+            del D
+            center_list = [x[0] for x in I.tolist()]
+            
+            self.cluster_centers += center_list
+        print(self.cluster_centers) 
+    
+    def run_kmeans_unbalanced(self):
+        self.cluster_centers = []
+        this_x = self.x.numpy()
+        if this_x.ndim == 3:
+            this_x = this_x.reshape(-1, this_x.shape[1] * this_x.shape[2])
+
+        if self.dist == "cosine":
+            this_x = preprocessing.normalize(this_x)
+        data_dim = this_x.shape[1]
+        kmeans = faiss.Kmeans(
+            data_dim, self.pts_per_class, niter=20, verbose=False, gpu=False
+        )
+        kmeans.train(this_x)
+        this_index = faiss.IndexFlatL2 (data_dim)
+        this_index.add(this_x)
+
+        D, I = index.search (kmeans.centroids, 1)  
+        del D
+        center_list = [x[0] for x in I.tolist()]
+        self.cluster_centers = center_list
+    
+    def get_arbitrary_pts(self):
+        return self.cluster_centers
+
+    
+
+    
+    
+    
 
 class WeightedSubset(torch.utils.data.Subset):
     def __init__(self, dataset, indices, weights) -> None:
@@ -732,7 +798,7 @@ class KmeansSelection(Selection):
         else:
             train_x = self.train_dataset.data
         
-        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
+        kmeans_cluster = KmeansFaiss(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
         kmeans_cluster.set_num_clusters(self.num_pseudo)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()
