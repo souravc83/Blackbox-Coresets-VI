@@ -1473,3 +1473,35 @@ class SubmodularSelection(KmeansGradientSelection):
             core_idc = core_idc + class_result.tolist()
         
         return core_idc
+    
+class LogResource:
+    def __init__(self):
+        self.curr_time = time.time()
+        self.prev_time = time.time()
+        self.time_per_epoch = []
+        self.memory_per_epoch = []
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        
+    def update(self):
+        self.prev_time = self.curr_time
+        self.curr_time = time.time()
+        self.time_per_epoch.append( 
+            self.curr_time - self.prev_time
+        )
+        
+        gb_conv_factor = 1024**3
+        
+        if self.device == 'cuda':
+            gpu_memory = torch.cuda.memory_allocated(0)/gb_conv_factor
+        else:
+            gpu_memory = 0
+        
+        self.memory_per_epoch.append(gpu_memory) 
+    
+    def get_resources(self):
+        avg_epoch_time = np.mean(self.time_per_epoch) 
+        avg_gpu_memory = np.mean(self.memory_per_epoch)
+        
+        return {'time': avg_epoch_time, 'memory': avg_gpu_memory}
+        

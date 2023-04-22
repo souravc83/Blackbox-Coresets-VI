@@ -35,7 +35,7 @@ from psvi.robust_higher.patch import monkeypatch
 from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
 from functools import partial 
-from psvi.inference.utils import make_dataloader, compute_empirical_mean, CoresetSelect
+from psvi.inference.utils import make_dataloader, compute_empirical_mean, CoresetSelect, LogResource
 
 class SubsetPreservingTransforms(Dataset):
     r"""
@@ -770,6 +770,9 @@ class PSVI(object):
         total_checkpts = list(range(self.num_epochs))[::log_every]
         downsample = 1 # downsample checkpoints for logging predictive uncertainty over a grid
         lpit = total_checkpts[::downsample]
+        
+        log_resource = LogResource()
+        
         for it in tqdm(range(self.num_epochs)):
             xbatch, ybatch = next(iter(self.train_loader))
             xbatch, ybatch = xbatch.to(self.device, non_blocking=True), ybatch.to(
@@ -808,7 +811,7 @@ class PSVI(object):
 
             # take a single optimization step
             psvi_step(xbatch, ybatch)
-
+            log_resource.update() 
             # prune coreset to smaller sizes
             if self.prune and it > 0 and it % self.prune_interval == 0:
                 if prune_idx < len(self.prune_sizes):
@@ -878,7 +881,8 @@ class PSVI(object):
                 loss = self.inner_elbo(model=self.model)
                 loss.backward()
                 self.optim_retrain.step()
-
+        
+        resource_data = log_resource.get_resources()
         # store results
         self.results["accs"] = accs_psvi
         self.results["nlls"] = nlls_psvi
@@ -889,6 +893,8 @@ class PSVI(object):
         self.results["ness"] = nesses
         self.results["vent"] = vs_entropy
         self.results["vs"] = vs
+        self.results["avg_epoch_time"] = resource_data['time']
+        self.results["gpu_memory"] = resource_data["memory"]
 
         if self.log_pseudodata:
             self.results["us"], self.results["zs"], self.results["grid_preds"] = (
