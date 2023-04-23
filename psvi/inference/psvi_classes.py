@@ -197,6 +197,9 @@ class PSVI(object):
         self.pretrain_epochs = pretrain_epochs
         self.lr0net = lr0net
         self.chosen_indices = []
+        
+        # to be compatible with alpha methods
+        self.alpha = None 
 
     def pseudo_subsample_init(self):
         r"""
@@ -790,7 +793,8 @@ class PSVI(object):
         pseudodata_init = {
             "random": self.pseudo_rand_init,  # different transformations applied on `train_dataset`
             "subsample": self.pseudo_subsample_init,
-            "custom": self.custom_init_evaluate
+            "custom": self.custom_init,
+            "saved": self.custom_init_evaluate 
         }
         pseudodata_init[self.init_args]()
         # optimization method
@@ -849,7 +853,7 @@ class PSVI(object):
                     print(f"\npredictive accuracy: {(100*test_acc.item()):.2f}%")
                     core_idcs_psvi.append(self.num_pseudo)
                     times.append(times[-1] + time.time() - t_start)
-                    vs.append((self.f(self.v, 0)).clone().cpu().detach().numpy())
+                    vs.append(self.v.clone().cpu().detach().numpy()) 
                     if iw_ent is not None:
                         iws_entropy.append(iw_ent.item())
                     if ness is not None:
@@ -938,6 +942,9 @@ class PSVI(object):
                 self.optim_retrain.step()
         
         resource_data = log_resource.get_resources()
+        
+        save_alpha = np.zeros(1) if self.alpha is None else self.alpha.cpu().detach().numpy()
+        
         # store results
         self.results["accs"] = accs_psvi
         self.results["nlls"] = nlls_psvi
@@ -951,6 +958,7 @@ class PSVI(object):
         self.results["avg_epoch_time"] = resource_data['time']
         self.results["gpu_memory"] = resource_data["memory"]
         self.results["chosen_indices"] = self.chosen_indices 
+        self.results["alpha"] = save_alpha
 
         if self.log_pseudodata:
             self.results["us"], self.results["zs"], self.results["grid_preds"] = (

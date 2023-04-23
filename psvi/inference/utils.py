@@ -799,7 +799,7 @@ class KmeansSelection(Selection):
         else:
             train_x = self.train_dataset.data
         
-        kmeans_cluster = KmeansFaiss(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
+        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
         kmeans_cluster.set_num_clusters(self.num_pseudo)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts()

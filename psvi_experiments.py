@@ -181,7 +181,7 @@ parser.add_argument(
 parser.add_argument(
     "--init_at",
     default="subsample",
-    choices=["subsample", "random", "custom"],
+    choices=["subsample", "random", "custom", "saved"],
     type=str,
     help="Method for coreset points initialization",
 )
