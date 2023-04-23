@@ -115,7 +115,7 @@ parser.add_argument(
 parser.add_argument(
     "--architecture",
     default="logistic_regression",
-    choices=["logistic_regression", "logistic_regression_fullcov", "fn", "fn2", "lenet", "regressor_net"],
+    choices=["logistic_regression", "logistic_regression_fullcov", "fn", "fn2", "lenet", "regressor_net", "resnet"],
     type=str,
     help="Model architecture",
 )

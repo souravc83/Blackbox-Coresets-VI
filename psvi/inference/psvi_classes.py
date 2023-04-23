@@ -27,6 +27,7 @@ from psvi.models.neural_net import (
     make_lenet,
     make_alexnet,
     make_regressor_net,
+    make_resnet,
     VILinear,
     VILinearMultivariateNormal,
 )
@@ -638,7 +639,12 @@ class PSVI(object):
                 mc_samples=self.mc_samples,
                 residual=(self.architecture == "residual_fn"),
                 init_sd=self.init_sd,
-            ).to(self.device)         
+            ).to(self.device)   
+        elif self.architecture == "resnet":
+            self.model = make_resnet(
+                mc_samples=self.mc_samples,
+                init_sd=self.init_sd
+            )
 
 
     def run_psvi(
