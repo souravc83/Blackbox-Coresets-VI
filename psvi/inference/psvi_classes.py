@@ -36,7 +36,13 @@ from psvi.robust_higher.patch import monkeypatch
 from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
 from functools import partial 
-from psvi.inference.utils import make_dataloader, compute_empirical_mean, CoresetSelect, LogResource
+from psvi.inference.utils import (
+    make_dataloader, 
+    compute_empirical_mean, 
+    CoresetSelect, 
+    LogResource,
+    retrieve_results
+)
 
 class SubsetPreservingTransforms(Dataset):
     r"""
@@ -190,6 +196,7 @@ class PSVI(object):
         self.load_from_saved = load_from_saved
         self.pretrain_epochs = pretrain_epochs
         self.lr0net = lr0net
+        self.chosen_indices = []
 
     def pseudo_subsample_init(self):
         r"""
@@ -299,15 +306,15 @@ class PSVI(object):
 
         wt_index = select_method.wt_index
         
-        chosen_indices = [int(x) for x in wt_index.keys()]
-        print(f"Chosen indices: {chosen_indices}")
+        self.chosen_indices = [int(x) for x in wt_index.keys()]
+        print(f"Chosen indices: {self.chosen_indices}")
         
-        chosen_dataset = Subset(self.train_dataset, chosen_indices)
+        chosen_dataset = Subset(self.train_dataset, self.chosen_indices)
         
         transform_loader = torch.utils.data.DataLoader(
             SubsetPreservingTransforms(
                 self.train_dataset,
-                indices=chosen_indices,
+                indices=self.chosen_indices,
                 dnm=self.dnm,
                 dim=self.D,
             ),
@@ -330,6 +337,48 @@ class PSVI(object):
             ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
             self.z.requires_grad_(True)
 
+    def custom_init_evaluate(self):
+        data_dict = retrieve_results(
+            subfolder_name='psvi_evaluate_MNIST_2023_04_23_17_18_38',
+            dataset='MNIST',
+            method='psvi_evaluate',
+            coreset_size=30
+        )
+        
+        # data points
+        self.chosen_indices = data_dict['chosen_indices']
+        
+        transform_loader = torch.utils.data.DataLoader(
+            SubsetPreservingTransforms(
+                self.train_dataset,
+                indices=self.chosen_indices,
+                dnm=self.dnm,
+                dim=self.D,
+            ),
+            batch_size=self.num_pseudo,
+            shuffle=False,
+        )
+        
+        data_tensor = next(iter(transform_loader))
+        self.u = data_tensor.to(self.device, non_blocking=True)
+        
+        # target
+        labels = data_dict['labels']
+        if labels.ndim == 1:
+            self.z = torch.tensor(labels)
+            if self.learn_z:
+                self.z = torch.nn.functional.one_hot(
+                    self.z.to(torch.int64),
+                    num_classes=self.nc,
+                ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
+        else:
+            self.z = torch.tensor(labels)
+
+        self.z = self.z.to(self.device, non_blocking=True)
+        
+        self.v = torch.tensor(data_dict['weights']).to(self.device, non_blocking=True)
+        
+        
     
     def psvi_elbo(self, xbatch, ybatch, model=None, params=None, hyperopt=False):
         r"""
@@ -741,7 +790,7 @@ class PSVI(object):
         pseudodata_init = {
             "random": self.pseudo_rand_init,  # different transformations applied on `train_dataset`
             "subsample": self.pseudo_subsample_init,
-            "custom": self.custom_init
+            "custom": self.custom_init_evaluate
         }
         pseudodata_init[self.init_args]()
         # optimization method
@@ -901,6 +950,7 @@ class PSVI(object):
         self.results["vs"] = vs
         self.results["avg_epoch_time"] = resource_data['time']
         self.results["gpu_memory"] = resource_data["memory"]
+        self.results["chosen_indices"] = self.chosen_indices 
 
         if self.log_pseudodata:
             self.results["us"], self.results["zs"], self.results["grid_preds"] = (

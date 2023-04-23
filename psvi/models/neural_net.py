@@ -222,7 +222,10 @@ class VIConv2d(VIMixin, nn.Conv2d):
             if self.mc_samples > 1
             else self._cached_weight
         )
-        if self.bias:
+        # do we want false instead of None
+        # this is where resnet fails, without this condition
+        # but lenet fails, saying bias is tensor
+        if self.bias is not None: 
             b = self._cached_bias.flatten()
         else:
             b = None

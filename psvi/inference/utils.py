@@ -26,6 +26,7 @@ import re
 from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
 import faiss
+import pickle
 
 
 
@@ -1504,4 +1505,38 @@ class LogResource:
         avg_gpu_memory = np.mean(self.memory_per_epoch)
         
         return {'time': avg_epoch_time, 'memory': avg_gpu_memory}
-        
+    
+
+def rec_dd():
+    return defaultdict(rec_dd)
+
+def get_results(subfolder=None):
+    folder_name = '/home/studio-lab-user/all_data/vi_result/'
+    #subfolder = None
+    if not subfolder:
+        fname = os.path.join(folder_name, 'results.pk')
+    else:
+        fname = os.path.join(folder_name, subfolder, 'results.pk')
+
+    with open(fname, 'rb') as f:
+           results = pickle.load(f)
+    
+    return results 
+
+def retrieve_results(subfolder_name=None, method='psvi_evaluate', 
+                     dataset='MNIST', coreset_size=30):
+    results = get_results(subfolder_name)
+    final_dict = results[dataset][method][coreset_size][0]
+    
+    
+    weights = final_dict['vs'][-1]
+    labels = final_dict['zs'][-1]
+    chosen_indices = final_dict['chosen_indices']
+    
+    return_dict = {
+        'chosen_indices': chosen_indices,
+        'weights': weights,
+        'labels': labels
+    }
+    
+    return return_dict
