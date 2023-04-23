@@ -342,9 +342,9 @@ class PSVI(object):
 
     def custom_init_evaluate(self):
         data_dict = retrieve_results(
-            subfolder_name='psvi_evaluate_MNIST_2023_04_23_17_18_38',
+            subfolder_name='psvi_alpha_fixed_u_MNIST_2023_04_23_21_53_47',
             dataset='MNIST',
-            method='psvi_evaluate',
+            method='psvi_alpha_fixed_u',
             coreset_size=30
         )
         
@@ -375,11 +375,14 @@ class PSVI(object):
                     num_classes=self.nc,
                 ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
         else:
-            self.z = torch.tensor(labels)
+            self.z = torch.tensor(labels).float()
 
         self.z = self.z.to(self.device, non_blocking=True)
+              
         
         self.v = torch.tensor(data_dict['weights']).to(self.device, non_blocking=True)
+        
+        self.alpha = torch.tensor(data_dict['alpha'], device=self.device)
         
         
     
@@ -1708,7 +1711,12 @@ class PSVIEvaluate(PSVI):
     def __init__(self, learn_v=False, parameterised=False, **kwargs):
         super().__init__(**kwargs)
         self.learn_v = False
-        self.learn_z = False 
+        self.learn_z = True 
+        self.alpha = torch.tensor([0.0], device=self.device)
+        self.f = lambda *x: (
+            torch.exp(self.alpha) * torch.softmax(x[0], x[1])
+        )  # transform v via softmax to keep the sum over the pseudodata fixed and multiply by a learnable non-negative coefficient
+
 
         
     def nested_step(self, xbatch, ybatch):

@@ -1533,10 +1533,17 @@ def retrieve_results(subfolder_name=None, method='psvi_evaluate',
     labels = final_dict['zs'][-1]
     chosen_indices = final_dict['chosen_indices']
     
+    if 'alpha' in final_dict.keys():
+        alpha = final_dict['alpha']
+    else:
+        alpha = np.zeros(1)
+
+    
     return_dict = {
         'chosen_indices': chosen_indices,
         'weights': weights,
-        'labels': labels
+        'labels': labels,
+        'alpha': alpha
     }
     
     return return_dict
