@@ -644,7 +644,7 @@ class PSVI(object):
             self.model = make_resnet(
                 mc_samples=self.mc_samples,
                 init_sd=self.init_sd
-            )
+            ).to(self.device)
 
 
     def run_psvi(
