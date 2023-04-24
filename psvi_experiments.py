@@ -318,6 +318,12 @@ parser.add_argument(
     help="For gradient calculations for embeddings, should we consider only the output layer, or the fc layer below it?",
 )
 
+parser.add_argument(
+    "--notes",
+    default="no notes",
+    type=str,
+    help="notes on what this experiment is trying to accomplish",
+)
 
 
 
