@@ -198,9 +198,6 @@ class PSVI(object):
         self.lr0net = lr0net
         self.chosen_indices = []
         
-        # to be compatible with alpha methods
-        self.alpha = None 
-
     def pseudo_subsample_init(self):
         r"""
         Initialization of pseudodata on random data subset with equal number of datapoints from each class
@@ -366,24 +363,46 @@ class PSVI(object):
         self.u = data_tensor.to(self.device, non_blocking=True)
         
         # target
-        labels = data_dict['labels']
-        if labels.ndim == 1:
-            self.z = torch.tensor(labels)
+        #72.74 even with ablated labels, ablated v and ablated alpha
+        
+        if self.ablated_labels:
+            chosen_dataset = Subset(self.train_dataset, self.chosen_indices)
+            target_tensor = torch.tensor([chosen_dataset[i][1] for i in range(len(chosen_dataset))])
+            self.z = target_tensor.to(self.device, non_blocking=True)
             if self.learn_z:
                 self.z = torch.nn.functional.one_hot(
                     self.z.to(torch.int64),
                     num_classes=self.nc,
                 ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
+                self.z.requires_grad_(False)
         else:
-            self.z = torch.tensor(labels).float()
+            labels = data_dict['labels']
+            if labels.ndim == 1:
+                self.z = torch.tensor(labels)
+                if self.learn_z:
+                    self.z = torch.nn.functional.one_hot(
+                        self.z.to(torch.int64),
+                        num_classes=self.nc,
+                    ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
+            else:
+                self.z = torch.tensor(labels).float()
 
-        self.z = self.z.to(self.device, non_blocking=True)
+            self.z = self.z.to(self.device, non_blocking=True)
               
         
-        self.v = torch.tensor(data_dict['weights']).to(self.device, non_blocking=True)
+        # even with ablated v and alpha, 72.80
+        if self.ablated_weights: 
+            random_v_arr = np.random.randn(30)
+            self.v = torch.tensor(random_v_arr).to(self.device, non_blocking=True).float()
+        else:
+            self.v = torch.tensor(data_dict['weights']).to(self.device, non_blocking=True)
+            
         
-        self.alpha = torch.tensor(data_dict['alpha'], device=self.device)
-        
+        # even with ablating alpha but not weights, we can get to 73.85 for 30 MNIST
+        if self.ablated_alpha:
+            self.alpha = torch.tensor([0.0], device=self.device)
+        else:
+            self.alpha = torch.tensor(data_dict['alpha'], device=self.device)
         
     
     def psvi_elbo(self, xbatch, ybatch, model=None, params=None, hyperopt=False):
@@ -945,9 +964,7 @@ class PSVI(object):
                 self.optim_retrain.step()
         
         resource_data = log_resource.get_resources()
-        
-        save_alpha = np.zeros(1) if self.alpha is None else self.alpha.cpu().detach().numpy()
-        
+                
         # store results
         self.results["accs"] = accs_psvi
         self.results["nlls"] = nlls_psvi
@@ -961,7 +978,6 @@ class PSVI(object):
         self.results["avg_epoch_time"] = resource_data['time']
         self.results["gpu_memory"] = resource_data["memory"]
         self.results["chosen_indices"] = self.chosen_indices 
-        self.results["alpha"] = save_alpha
 
         if self.log_pseudodata:
             self.results["us"], self.results["zs"], self.results["grid_preds"] = (
@@ -1711,11 +1727,18 @@ class PSVIEvaluate(PSVI):
     def __init__(self, learn_v=False, parameterised=False, **kwargs):
         super().__init__(**kwargs)
         self.learn_v = False
-        self.learn_z = True 
+        self.learn_z = True
+        
         self.alpha = torch.tensor([0.0], device=self.device)
+        self.alpha.requires_grad_(False)
         self.f = lambda *x: (
             torch.exp(self.alpha) * torch.softmax(x[0], x[1])
         )  # transform v via softmax to keep the sum over the pseudodata fixed and multiply by a learnable non-negative coefficient
+        
+        #ablations
+        self.ablated_weights = True
+        self.ablated_alpha = True 
+        self.ablated_labels = True 
 
 
         
