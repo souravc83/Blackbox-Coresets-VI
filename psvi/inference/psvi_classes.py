@@ -335,7 +335,7 @@ class PSVI(object):
                 self.z.to(torch.int64),
                 num_classes=self.nc,
             ).float()  # initialize target logits close to one-hot-encoding [0,..., class, ..., 0]-vectors
-            self.z.requires_grad_(True)
+            self.z.requires_grad_(False)
         
         random_v_arr = np.random.randn(self.num_pseudo)
         self.v = torch.tensor(random_v_arr).to(self.device, non_blocking=True).float()
