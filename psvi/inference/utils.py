@@ -335,6 +335,7 @@ class MeanFieldVI():
         # for forgetting scores
         self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.device)
         self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.device)
+        self.never_learnt_events = torch.ones(self.n_train, requires_grad=False).to(self.device)
 
 
     
@@ -377,6 +378,13 @@ class MeanFieldVI():
                 forget_ind = torch.tensor(batch_ind)[self.last_acc[batch_ind] > curr_acc]
                 self.forgetting_events[forget_ind] += 1
                 self.last_acc[batch_ind] = curr_acc
+                
+                # not learnt, curr_acc = 0, 1-curr_acc = 1, 
+                # learnt: curr_acc = 1, 1- curr_acc = 0
+                self.never_learnt_events[batch_ind] = torch.min(
+                    self.never_learnt_events[batch_ind],
+                    1.0 - curr_acc
+                )
 
     
     def run(self):
@@ -394,7 +402,15 @@ class MeanFieldVI():
             self.after_epoch()
             
             if i % self.log_every == 0 or i == self.total_iterations -1:
-                self.test() 
+                self.test()
+        
+        # if forgetting combine never learnt and forgetting:
+        if self.forgetting_score_flag:
+            self.forgetting_events = torch.max(
+                self.total_iterations * self.never_learnt_events,
+                self.forgetting_events
+            )
+        
         self.save()
     
     def _get_net_fname(self):
