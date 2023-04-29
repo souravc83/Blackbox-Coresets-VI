@@ -27,7 +27,7 @@ from psvi.experiments.experiments_utils import set_up_model
 from tqdm import tqdm
 import faiss
 import pickle
-
+import pandas as pd
 
 
 def pseudo_subsample_init(x, y, num_pseudo=20, nc=2, seed=0):
@@ -535,12 +535,20 @@ class KmeansCluster():
         self.cluster_centers.append(kmeans.cluster_centers_)        
 
                 
-    def get_arbitrary_pts(self):
+    def get_arbitrary_pts(self, total_pts):
+        pts_per_cluster = [total_pts // self.num_clusters] * self.num_clusters
+        pts_per_cluster[-1] = total_pts - sum(pts_per_cluster[:-1])
         core_idcs = []
+        counter = 0
         for this_kmeans_dict in self.kmeans_dict:
             for k in this_kmeans_dict.keys():
                 if len(this_kmeans_dict[k]) > 0: 
-                    core_idcs.append(random.choice(this_kmeans_dict[k]))
+                    num_pts = pts_per_cluster[counter]
+                    counter += 1
+                    pts_this_cluster = np.random.choice(this_kmeans_dict[k], num_pts, replace=False)
+                    print(f"Points from this cluster: {pts_this_cluster}")
+                    
+                    core_idcs = core_idcs + list(pts_this_cluster)
         
         return core_idcs
     
@@ -604,12 +612,8 @@ class KmeansFaiss(KmeansCluster):
     def get_arbitrary_pts(self):
         return self.cluster_centers
 
-    
 
     
-    
-    
-
 class WeightedSubset(torch.utils.data.Subset):
     def __init__(self, dataset, indices, weights) -> None:
         self.dataset = dataset
@@ -676,10 +680,7 @@ class Selection():
         )
         
         return self.chosen_dataset
-    
-        
-    
-    
+
     def pretrain(
         self,
         test_dataset,
@@ -728,6 +729,17 @@ class Selection():
         
         self.pretrained_net = self.pretrained_vi.net
 
+
+def sample_multinomial(pval, k):
+    if type(pval) == list:
+        pval = np.array(pval)
+        
+    N = pval.shape[0]
+    samples = np.random.multinomial(2*N, pval, size=1)[0]
+    idx_sorted = np.argsort(samples)
+    print(idx_sorted[-k:])
+    
+    return idx_sorted[-k:]
     
 
 class RandomSelection(Selection):
@@ -771,10 +783,12 @@ class RandomSelection(Selection):
     
             
 class KmeansSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False, dist="euclidean"):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False, dist="euclidean", data_folder=None, dnm='MNIST'):
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
         self.embedding_flag = embedding_flag
         self.dist = dist 
+        self.data_folder = data_folder
+        self.dnm = dnm
     
     def select(self):
         
@@ -816,11 +830,32 @@ class KmeansSelection(Selection):
             train_x = self.train_dataset.data
         
         kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
-        kmeans_cluster.set_num_clusters(self.num_pseudo)
+        kmeans_cluster.set_num_clusters(20)
         kmeans_cluster.run_kmeans()
-        core_idc = kmeans_cluster.get_arbitrary_pts()
+        core_idc = kmeans_cluster.get_arbitrary_pts(self.num_pseudo)
+        
+        print(f"Number of data points: {len(core_idc)}")
+        print(f"Number of unique data points {len(list(set(core_idc)))}")
         
         return core_idc
+    
+    def _run_kmeans_loaded(self):
+        embedding_fname = f'embedding_{self.dnm}_{self.seed}.csv'
+
+        full_fname = os.path.join(self.data_folder, embedding_fname)
+        emb_df = pd.read_csv(full_fname, sep=',', header=None)
+        train_x = torch.from_numpy(emb_df.values)
+        
+        train_y = self.train_dataset.targets
+        n_train = len(self.train_dataset)
+
+        self.kmeans_cluster = KmeansCluster(
+            x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist
+        )
+        
+        self.kmeans_cluster.set_num_clusters(20)
+        self.kmeans_cluster.run_kmeans()
+
     
     def pretrain(
         self,
@@ -869,7 +904,11 @@ class KmeansSelection(Selection):
 
 class ScoreSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, 
-                 forgetting_flag=False, score_type='least_confidence'):
+                 forgetting_flag=False, score_type='least_confidence',
+                 data_folder=None, dnm='MNIST'):
+        
+        self.data_folder = data_folder
+        self.dnm = dnm
         
         if score_type == "forgetting":
             forgetting_flag = True
@@ -884,7 +923,8 @@ class ScoreSelection(Selection):
 
     def select(self):
         # make sure this is pretrained
-        score_arr = self._get_uncertainty_score()
+        #score_arr = self._get_uncertainty_score()
+        score_arr = self._get_uncertainty_score_loaded()
         # select the top scores, for each class 
         n_train = len(self.train_dataset)
         pts_per_class = self.num_pseudo//self.nc
@@ -935,6 +975,18 @@ class ScoreSelection(Selection):
         
         return score_arr
     
+    def _get_uncertainty_score_loaded(self):
+        #self.data_folder = "/home/studio-lab-user/all_data/vi_data"
+        #self.dnm = 'MNIST'
+        #self.seed = 0
+        
+        score_fname = os.path.join(self.data_folder, f'score_psvi_{self.dnm}_{self.seed}.csv')
+        score_df = pd.read_csv(score_fname) 
+        score_arr = torch.from_numpy(score_df[self.score_type].values)
+        
+        return score_arr
+    
+    
     # from eqn 2 https://arxiv.org/pdf/2204.08499.pdf
     def _least_confidence_score(self, outputs_prob):
         score = 1.0 -  outputs_prob.max(1).values
@@ -958,20 +1010,54 @@ class ScoreSelection(Selection):
     
     def _forgetting_score(self, i, data_minibatch, n_train):
         return self.pretrained_vi.forgetting_events[i * data_minibatch: min((i + 1) * data_minibatch, n_train)]
+    
+
+    
+class ScoreCalculator:
+    def __init__(self, outputs_prob, target, nc=10):
+        self.outputs_prob = outputs_prob
+        self.target = target
+        self.nc = nc
+    
+    def least_confidence_score(self):
+        score = 1.0 -  self.outputs_prob.max(1).values
+        return score
+    
+    def entropy_score(self):
+        p_eps = self.outputs_prob + 1e-20
+        p_log_p = self.outputs_prob.mul(torch.log(p_eps))
+        entropy_score = - p_log_p.sum(1)
         
+        return entropy_score
+    
+    def el2n_score(self):
+        targets_onehot = F.one_hot(self.target.long(), num_classes=self.nc)
+        el2n_score = torch.linalg.vector_norm(
+            x=(self.outputs_prob - targets_onehot),
+            ord=2,
+            dim=1
+        )
+                        
+        return el2n_score
+
+
 
 
 class KmeansScoreSelection(ScoreSelection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, score_type="least_confidence", embedding_flag=False, dist="euclidean"):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, 
+                 score_type="least_confidence", embedding_flag=False, dist="euclidean", data_folder=None,
+                dnm='MNIST'):
         
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
         self.embedding_flag = embedding_flag 
         self.dist = dist 
+        self.data_folder = data_folder
+        self.dnm = dnm
         
     def select(self):
         # make sure this is pretrained
         self.score_arr = self._get_uncertainty_score()
-        self._run_kmeans()
+        self._run_kmeans_loaded()
         
         return self._combine_kmeans_score()
     
@@ -1013,18 +1099,45 @@ class KmeansScoreSelection(ScoreSelection):
 
 
         self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
-        self.kmeans_cluster.set_num_clusters(self.num_pseudo)
+        self.kmeans_cluster.set_num_clusters(20)
         self.kmeans_cluster.run_kmeans()
     
+    
+    def _run_kmeans_loaded(self):
+        embedding_fname = f'embedding_{self.dnm}_{self.seed}.csv'
+
+        full_fname = os.path.join(self.data_folder, embedding_fname)
+        emb_df = pd.read_csv(full_fname, sep=',', header=None)
+        train_x = torch.from_numpy(emb_df.values)
+        
+        train_y = self.train_dataset.targets
+        n_train = len(self.train_dataset)
+
+        self.kmeans_cluster = KmeansCluster(
+            x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist
+        )
+        
+        self.kmeans_cluster.set_num_clusters(20)
+        self.kmeans_cluster.run_kmeans()
+
+
+    
     def _combine_kmeans_score(self):
+        alpha = 2. 
+        
         core_idcs = []
         for this_kmeans_dict in self.kmeans_cluster.kmeans_dict:
             for k in this_kmeans_dict.keys():
                 if len(this_kmeans_dict[k]) > 0: 
                     indices = this_kmeans_dict[k]
-                    score_arr_sub = self.score_arr[indices]
-                    max_score_index = torch.argmax(score_arr_sub).detach().numpy()
-                    core_idcs.append(indices[max_score_index])
+                    score_arr_sub = [x + alpha for x in self.score_arr[indices]]
+                    score_sum = sum(score_arr_sub)
+                    pvals = [x/score_sum for x in score_arr_sub]
+                    chosen_indices = list(sample_multinomial(pval=pvals, k=4))
+                    
+                    #max_score_index = torch.argmax(score_arr_sub).detach().numpy()
+                    #core_idcs.append(indices[max_score_index])
+                    core_idcs = core_idcs + [indices[x] for x in chosen_indices]
         
         return core_idcs
 
@@ -1241,7 +1354,9 @@ class CoresetSelect():
                 nc=self.nc,
                 seed=self.seed,
                 embedding_flag=embedding_flag,
-                dist=self.distance_fn 
+                dist=self.distance_fn,
+                data_folder=self.data_folder,
+                dnm=self.dnm
             )
         elif self.score_method == "kmeans_gradient":
             select_method = KmeansGradientSelection(
@@ -1277,7 +1392,9 @@ class CoresetSelect():
                 num_pseudo=self.num_pseudo,
                 nc=self.nc,
                 seed=self.seed,
-                score_type=self.score_method
+                score_type=self.score_method,
+                data_folder=self.data_folder,
+                dnm=self.dnm
             )
         elif self.score_method in [
             "scored_kmeans_el2n", "scored_kmeans_forgetting", 
@@ -1293,7 +1410,9 @@ class CoresetSelect():
                 seed=self.seed,
                 score_type=scoring_method,
                 embedding_flag=embedding_flag,
-                dist=self.distance_fn
+                dist=self.distance_fn,
+                data_folder=self.data_folder,
+                dnm=self.dnm
             )
             
         elif self.score_method in [

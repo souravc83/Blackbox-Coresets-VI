@@ -41,8 +41,12 @@ from psvi.inference.utils import (
     compute_empirical_mean, 
     CoresetSelect, 
     LogResource,
-    retrieve_results
+    retrieve_results,
+    ScoreCalculator
 )
+import pandas as pd
+import os
+
 
 class SubsetPreservingTransforms(Dataset):
     r"""
@@ -197,6 +201,20 @@ class PSVI(object):
         self.pretrain_epochs = pretrain_epochs
         self.lr0net = lr0net
         self.chosen_indices = []
+        
+        # score calculating related variables
+        self.forgetting_score_flag = True
+        self.score_fname = f'score_psvi_{self.dnm}_{seed}.csv'
+        self.embedding_fname = f'embedding_{self.dnm}_{seed}.csv'
+        
+        self.scoring_run = True
+        self.n_train  = len(self.train_dataset)
+        
+        self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.device)
+        self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.device)
+        self.never_learnt_events = torch.ones(self.n_train, requires_grad=False).to(self.device)
+
+
         
     def pseudo_subsample_init(self):
         r"""
@@ -863,6 +881,8 @@ class PSVI(object):
             xbatch, ybatch = xbatch.to(self.device, non_blocking=True), ybatch.to(
                 self.device, non_blocking=True
             )
+            self._forgetting_calculator()
+            
             # evaluation
             if it % self.log_every == 0:
                 test_acc, test_nll, iw_ent, ness, v_ent = self.evaluate()
@@ -968,6 +988,7 @@ class PSVI(object):
                 self.optim_retrain.step()
         
         resource_data = log_resource.get_resources()
+        self._do_scoring()
                 
         # store results
         self.results["accs"] = accs_psvi
@@ -1179,6 +1200,130 @@ class PSVI(object):
         self.u, self.z = torch.cat((self.u, new_us)).detach().requires_grad_(True), torch.cat((self.z, new_zs))
         self.optim_u = torch.optim.Adam([self.u], lr0u)
         self.optim_net = torch.optim.Adam(list(self.model.parameters()), lr0net)
+    
+    def _do_scoring(self):
+        if not self.scoring_run:
+            return         
+        
+        softmax_fn = torch.nn.Softmax()
+        n_train = len(self.train_dataset)
+        data_minibatch = 128
+        
+        entropy_arr = torch.zeros(n_train, requires_grad=False)
+        el2n_arr = torch.zeros(n_train, requires_grad=False)
+        least_confidence_arr = torch.zeros(n_train, requires_grad=False)
+        # shuffle=False is very important for this
+        score_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+        
+        with torch.no_grad():
+            for i, (data, target) in enumerate(score_dataloader):
+                data = data.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+
+                output = self.model(data).squeeze(-1).mean(0)
+                outputs_prob = softmax_fn(output)
+                
+                score_calc = ScoreCalculator(
+                    outputs_prob=outputs_prob, 
+                    target=target,
+                    nc=self.nc
+                )
+                
+                idx = slice(
+                    i * data_minibatch,
+                     min((i + 1) * data_minibatch, n_train)
+                )
+                    
+                entropy_arr[idx] = score_calc.entropy_score()
+                least_confidence_arr[idx] = score_calc.least_confidence_score()
+                el2n_arr[idx] = score_calc.el2n_score()
+        
+        self.forgetting_events = torch.max(
+            self.num_epochs * self.never_learnt_events,
+            self.forgetting_events
+        )
+        
+        scoring_dict = {
+            'el2n': el2n_arr.cpu().numpy(),
+            'forgetting': self.forgetting_events.cpu().numpy(),
+            'entropy': entropy_arr.cpu().numpy(),
+            'least_confidence': least_confidence_arr.cpu().numpy(),
+            'forgetting': self.forgetting_events.cpu().numpy()
+        }
+        
+        df = pd.DataFrame(scoring_dict)
+        full_fname = os.path.join(self.data_folder, self.score_fname)
+        
+        df.to_csv(full_fname, index=False, header=True)
+        
+        self._get_embeddings()
+        
+    
+    def _forgetting_calculator(self):
+        if not self.forgetting_score_flag:
+            return 
+        
+        n_train = len(self.train_dataset)
+        data_minibatch = 128
+        score_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+
+        for i, (xbatch, ybatch) in enumerate(score_dataloader):
+            xbatch, ybatch = xbatch.to(self.device, non_blocking=True), ybatch.to(
+                self.device, non_blocking=True
+            )
+            
+            batch_ind = list(range(
+                (i * data_minibatch), (min((i + 1) * data_minibatch, n_train))                
+            ))
+            
+            with torch.no_grad():
+                train_logits = self.model(xbatch).squeeze(-1).mean(0)
+                curr_acc = train_logits.argmax(-1).float().eq(ybatch).float()
+                forget_ind = torch.tensor(batch_ind)[self.last_acc[batch_ind] > curr_acc]
+                self.forgetting_events[forget_ind] += 1
+                self.last_acc[batch_ind] = curr_acc
+                
+                # not learnt, curr_acc = 0, 1-curr_acc = 1, 
+                # learnt: curr_acc = 1, 1- curr_acc = 0
+                self.never_learnt_events[batch_ind] = torch.min(
+                    self.never_learnt_events[batch_ind],
+                    1.0 - curr_acc
+                )
+    
+    def _get_embeddings(self):
+        # for now this is hardcoded to lenet value
+        # later, we might need to provide this with architecture
+        n_train = len(self.train_dataset)
+        embedding_size = 84
+        embeddings = torch.zeros(n_train, embedding_size, requires_grad=False).to(self.device)
+        data_minibatch = 128
+        kmeans_dataloader = DataLoader(self.train_dataset, batch_size=data_minibatch, shuffle=False)
+        last_layer = None
+
+        pretrained_net = self.model
+        pretrained_net.eval()
+        
+        with torch.no_grad():
+            for i, (data, target) in enumerate(kmeans_dataloader):
+                data = data.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+
+                batch_ind = list(range(
+                    (i * data_minibatch), (min((i + 1) * data_minibatch, n_train))
+                ))
+
+                x = data
+                for layer in pretrained_net:
+                    last_layer = x
+                    x = layer(x)
+
+                embeddings[batch_ind] = last_layer.sum(0).squeeze(0)
+
+        embeddings_np = embeddings.cpu().numpy()
+        full_fname = os.path.join(self.data_folder, self.embedding_fname)
+        np.savetxt(full_fname, embeddings_np, delimiter=",")
+
+
 
 
 class PSVILearnV(PSVI):
