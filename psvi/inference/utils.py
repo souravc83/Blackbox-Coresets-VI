@@ -791,6 +791,9 @@ class KmeansSelection(Selection):
         self.dnm = dnm
     
     def select(self):
+        return self._run_kmeans_loaded()
+    
+    def _run_kmeans(self):
         
         train_y = self.train_dataset.targets
         n_train = len(self.train_dataset)
@@ -829,14 +832,16 @@ class KmeansSelection(Selection):
         else:
             train_x = self.train_dataset.data
         
-        kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
-        kmeans_cluster.set_num_clusters(20)
+        kmeans_cluster = KmeansCluster(
+            x=train_x, y=train_y, num_classes=self.nc, 
+            seed=self.seed, dist=self.dist
+        )
+        num_clusters = self._set_num_clusters()
+        
+        kmeans_cluster.set_num_clusters(num_clusters)
         kmeans_cluster.run_kmeans()
         core_idc = kmeans_cluster.get_arbitrary_pts(self.num_pseudo)
-        
-        print(f"Number of data points: {len(core_idc)}")
-        print(f"Number of unique data points {len(list(set(core_idc)))}")
-        
+                
         return core_idc
     
     def _run_kmeans_loaded(self):
@@ -849,14 +854,30 @@ class KmeansSelection(Selection):
         train_y = self.train_dataset.targets
         n_train = len(self.train_dataset)
 
-        self.kmeans_cluster = KmeansCluster(
+        kmeans_cluster = KmeansCluster(
             x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist
         )
         
-        self.kmeans_cluster.set_num_clusters(20)
-        self.kmeans_cluster.run_kmeans()
-
+        num_clusters = self._set_num_clusters()
+        
+        kmeans_cluster.set_num_clusters(num_clusters)
+        kmeans_cluster.run_kmeans()
+        core_idc = kmeans_cluster.get_arbitrary_pts(self.num_pseudo)
+                
+        return core_idc
     
+    
+    def _set_num_clusters(self):
+        if self.num_pseudo == 30:
+            return 30
+        elif self.num_pseudo == 50:
+            return 50
+        elif self.num_pseudo == 80:
+            return 20
+        elif self.num_pseudo == 100:
+            return 20
+
+
     def pretrain(
         self,
         test_dataset,
@@ -1117,13 +1138,29 @@ class KmeansScoreSelection(ScoreSelection):
             x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist
         )
         
-        self.kmeans_cluster.set_num_clusters(20)
+        num_clusters = self._set_num_clusters()
+        
+        self.kmeans_cluster.set_num_clusters(num_clusters)
         self.kmeans_cluster.run_kmeans()
 
+    
+    def _set_num_clusters(self):
+        if self.num_pseudo == 30:
+            return 30
+        elif self.num_pseudo == 50:
+            return 50
+        elif self.num_pseudo == 80:
+            return 20
+        elif self.num_pseudo == 100:
+            return 20
 
     
     def _combine_kmeans_score(self):
         alpha = 2. 
+        
+        num_clusters = self._set_num_clusters()
+        pts_per_cluster = int(self.num_pseudo / num_clusters)
+        
         
         core_idcs = []
         for this_kmeans_dict in self.kmeans_cluster.kmeans_dict:
@@ -1133,7 +1170,7 @@ class KmeansScoreSelection(ScoreSelection):
                     score_arr_sub = [x + alpha for x in self.score_arr[indices]]
                     score_sum = sum(score_arr_sub)
                     pvals = [x/score_sum for x in score_arr_sub]
-                    chosen_indices = list(sample_multinomial(pval=pvals, k=4))
+                    chosen_indices = list(sample_multinomial(pval=pvals, k=pts_per_cluster))
                     
                     #max_score_index = torch.argmax(score_arr_sub).detach().numpy()
                     #core_idcs.append(indices[max_score_index])
