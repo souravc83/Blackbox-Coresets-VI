@@ -130,6 +130,11 @@ class PSVI(object):
         load_from_saved=False,
         pretrain_epochs=5,
         lr0net=1e-3,
+        multiple_pts_per_cluster=True,
+        loaded_from_psvi=True,
+        alpha_dirichlet=0,
+        choose_difficult=True,
+        scoring_run=False,
         **kwargs,
     ):
         np.random.seed(seed), torch.manual_seed(seed)
@@ -203,18 +208,22 @@ class PSVI(object):
         self.chosen_indices = []
         
         # score calculating related variables
-        self.forgetting_score_flag = True
+        self.forgetting_score_flag = scoring_run
         self.score_fname = f'score_psvi_{self.dnm}_{seed}.csv'
         self.embedding_fname = f'embedding_{self.dnm}_{seed}.csv'
         
-        self.scoring_run = True
+        #self.scoring_run = True
         self.n_train  = len(self.train_dataset)
         
         self.forgetting_events = torch.zeros(self.n_train, requires_grad=False).to(self.device)
         self.last_acc = torch.zeros(self.n_train, requires_grad=False).to(self.device)
         self.never_learnt_events = torch.ones(self.n_train, requires_grad=False).to(self.device)
 
-
+        self.multiple_pts_per_cluster = multiple_pts_per_cluster
+        self.loaded_from_psvi = loaded_from_psvi
+        self.alpha_dirichlet = alpha_dirichlet
+        self.choose_difficult = choose_difficult
+        self.scoring_run=scoring_run
         
     def pseudo_subsample_init(self):
         r"""
@@ -317,7 +326,11 @@ class PSVI(object):
             log_every=10,
             data_folder=self.data_folder,
             load_from_saved=self.load_from_saved,
-            dnm=self.dnm
+            dnm=self.dnm,
+            multiple_pts_per_cluster=self.multiple_pts_per_cluster,
+            loaded_from_psvi=self.loaded_from_psvi,
+            alpha_dirichlet=self.alpha_dirichlet,
+            choose_difficult=self.choose_difficult
         )
         
         select_method.select_data()

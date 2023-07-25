@@ -423,8 +423,7 @@ class MeanFieldVI():
         forgetting_fname = \
             f'forgetting_{self.dnm}_{self.architecture}_{self.num_epochs}_{self.seed}.pt'
         forgetting_full_fname = os.path.join(self.data_path, forgetting_fname)
-        return forgetting_full_fname
-        
+        return forgetting_full_fname        
     
     def save(self):
         net_full_fname = self._get_net_fname()
@@ -735,11 +734,16 @@ def sample_multinomial(pval, k):
         pval = np.array(pval)
         
     N = pval.shape[0]
-    samples = np.random.multinomial(2*N, pval, size=1)[0]
-    idx_sorted = np.argsort(samples)
-    print(idx_sorted[-k:])
+    try:
+        samples = np.random.multinomial(2*N, pval, size=1)[0]
+        idx_sorted = np.argsort(samples)
+        ret_arr = idx_sorted[-k:]
+    except:
+        ret_arr = np.random.choice(a=N, size=k, replace=False)
     
-    return idx_sorted[-k:]
+    return ret_arr
+    #print(idx_sorted[-k:])
+    
     
 
 class RandomSelection(Selection):
@@ -783,15 +787,20 @@ class RandomSelection(Selection):
     
             
 class KmeansSelection(Selection):
-    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False, dist="euclidean", data_folder=None, dnm='MNIST'):
+    def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, embedding_flag=False, dist="euclidean", data_folder=None, dnm='MNIST', multiple_pts = True, loaded=True):
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag)
         self.embedding_flag = embedding_flag
         self.dist = dist 
         self.data_folder = data_folder
         self.dnm = dnm
+        self.multiple_pts = multiple_pts
+        self.loaded = loaded
     
     def select(self):
-        return self._run_kmeans_loaded()
+        if self.loaded:
+            return self._run_kmeans_loaded()
+        else:
+            return self._run_kmeans()
     
     def _run_kmeans(self):
         
@@ -868,6 +877,9 @@ class KmeansSelection(Selection):
     
     
     def _set_num_clusters(self):
+        if not self.multiple_pts:
+            return self.num_pseudo
+        
         if self.num_pseudo == 30:
             return 30
         elif self.num_pseudo == 50:
@@ -900,6 +912,9 @@ class KmeansSelection(Selection):
             # 
             if not self.embedding_flag:
                 pass 
+            if self.loaded:
+                pass 
+            
             else:
                 # for now the embeddings are only for lenet
                 if architecture != 'lenet':
@@ -926,7 +941,7 @@ class KmeansSelection(Selection):
 class ScoreSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, 
                  forgetting_flag=False, score_type='least_confidence',
-                 data_folder=None, dnm='MNIST'):
+                 data_folder=None, dnm='MNIST', loaded=True):
         
         self.data_folder = data_folder
         self.dnm = dnm
@@ -941,11 +956,15 @@ class ScoreSelection(Selection):
             raise ValueError(f"{score_type} not in {allowed_scores}")
         
         self.score_type = score_type
+        self.loaded = loaded
 
     def select(self):
         # make sure this is pretrained
-        #score_arr = self._get_uncertainty_score()
-        score_arr = self._get_uncertainty_score_loaded()
+        if self.loaded:
+            score_arr = self._get_uncertainty_score_loaded()
+        else:
+            score_arr = self._get_uncertainty_score()
+        
         # select the top scores, for each class 
         n_train = len(self.train_dataset)
         pts_per_class = self.num_pseudo//self.nc
@@ -1016,7 +1035,7 @@ class ScoreSelection(Selection):
     def _entropy_score(self, outputs_prob):
         p_eps = outputs_prob + 1e-20
         p_log_p = outputs_prob.mul(torch.log(p_eps))
-        entropy_score = p_log_p.sum(1)
+        entropy_score = - p_log_p.sum(1)
         return entropy_score
     
     def _el2n_score(self, outputs_prob, target):
@@ -1062,23 +1081,32 @@ class ScoreCalculator:
         return el2n_score
 
 
-
-
 class KmeansScoreSelection(ScoreSelection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, 
                  score_type="least_confidence", embedding_flag=False, dist="euclidean", data_folder=None,
-                dnm='MNIST'):
+                dnm='MNIST', multiple_pts = True, alpha=0, loaded=True, choose_difficult=True):
         
-        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type)
+        super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type, 
+                        data_folder, dnm, loaded)
         self.embedding_flag = embedding_flag 
         self.dist = dist 
         self.data_folder = data_folder
         self.dnm = dnm
+        self.alpha = alpha
+        # should we do a single point per cluster or multiple
+        self.multiple_pts = multiple_pts 
+        self.choose_difficult = choose_difficult
         
     def select(self):
         # make sure this is pretrained
-        self.score_arr = self._get_uncertainty_score()
-        self._run_kmeans_loaded()
+        if self.loaded:
+            self.score_arr = self._get_uncertainty_score_loaded()
+        else:
+            self.score_arr = self._get_uncertainty_score()
+        if self.loaded:
+            self._run_kmeans_loaded()
+        else:
+            self._run_kmeans()
         
         return self._combine_kmeans_score()
     
@@ -1120,7 +1148,8 @@ class KmeansScoreSelection(ScoreSelection):
 
 
         self.kmeans_cluster = KmeansCluster(x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist)
-        self.kmeans_cluster.set_num_clusters(20)
+        num_clusters = self._set_num_clusters()
+        self.kmeans_cluster.set_num_clusters(num_clusters)
         self.kmeans_cluster.run_kmeans()
     
     
@@ -1138,6 +1167,7 @@ class KmeansScoreSelection(ScoreSelection):
             x=train_x, y=train_y, num_classes=self.nc, seed=self.seed, dist=self.dist
         )
         
+        
         num_clusters = self._set_num_clusters()
         
         self.kmeans_cluster.set_num_clusters(num_clusters)
@@ -1145,6 +1175,9 @@ class KmeansScoreSelection(ScoreSelection):
 
     
     def _set_num_clusters(self):
+        if not self.multiple_pts:
+            return self.num_pseudo
+        
         if self.num_pseudo == 30:
             return 30
         elif self.num_pseudo == 50:
@@ -1154,22 +1187,42 @@ class KmeansScoreSelection(ScoreSelection):
         elif self.num_pseudo == 100:
             return 20
 
+    def _check_score_arr(self, pvals):
+        print("pval debug")
+        for x in pvals:
+            if x < 0:
+                print(x)
+            elif x > 1:
+                print(x)
+            elif np.isnan(x):
+                print(x)
+        
     
     def _combine_kmeans_score(self):
-        alpha = 2. 
+        #alpha = 2. 
         
         num_clusters = self._set_num_clusters()
         pts_per_cluster = int(self.num_pseudo / num_clusters)
         
+        #print(f"alpha: {self.alpha}")
+        #print(f"multiple_pts: {self.multiple_pts}")
         
         core_idcs = []
         for this_kmeans_dict in self.kmeans_cluster.kmeans_dict:
             for k in this_kmeans_dict.keys():
                 if len(this_kmeans_dict[k]) > 0: 
                     indices = this_kmeans_dict[k]
-                    score_arr_sub = [x + alpha for x in self.score_arr[indices]]
+                    #print(f"Score: {self.score_arr[indices]}")
+                    
+                    if self.choose_difficult:
+                        score_arr_sub = [x + self.alpha for x in self.score_arr[indices]]
+                    else:
+                        score_arr_sub = [1./(x + self.alpha + 1e-20) for x in self.score_arr[indices]]
+                    #print(score_arr_sub)
                     score_sum = sum(score_arr_sub)
                     pvals = [x/score_sum for x in score_arr_sub]
+                    #self._check_score_arr(pvals)
+                    
                     chosen_indices = list(sample_multinomial(pval=pvals, k=pts_per_cluster))
                     
                     #max_score_index = torch.argmax(score_arr_sub).detach().numpy()
@@ -1352,7 +1405,11 @@ class CoresetSelect():
                  load_from_saved=False,
                  dnm=None,
                  distance_fn="euclidean",
-                 last_layer_only=False
+                 last_layer_only=False,
+                 multiple_pts_per_cluster=True,
+                 loaded_from_psvi=True,
+                 alpha_dirichlet=0,
+                 choose_difficult=True
                 ):
         self.architecture = architecture
         self.score_method = score_method
@@ -1375,6 +1432,11 @@ class CoresetSelect():
         self.dnm = dnm
         self.distance_fn = distance_fn 
         self.last_layer_only = last_layer_only 
+        self.multiple_pts_per_cluster = multiple_pts_per_cluster
+        self.loaded_from_psvi = loaded_from_psvi
+        self.alpha_dirichlet = alpha_dirichlet
+        self.choose_difficult = choose_difficult
+
         
         
     
@@ -1393,7 +1455,9 @@ class CoresetSelect():
                 embedding_flag=embedding_flag,
                 dist=self.distance_fn,
                 data_folder=self.data_folder,
-                dnm=self.dnm
+                dnm=self.dnm,
+                multiple_pts = self.multiple_pts_per_cluster,
+                loaded=self.loaded_from_psvi
             )
         elif self.score_method == "kmeans_gradient":
             select_method = KmeansGradientSelection(
@@ -1431,7 +1495,8 @@ class CoresetSelect():
                 seed=self.seed,
                 score_type=self.score_method,
                 data_folder=self.data_folder,
-                dnm=self.dnm
+                dnm=self.dnm,
+                loaded=self.loaded_from_psvi
             )
         elif self.score_method in [
             "scored_kmeans_el2n", "scored_kmeans_forgetting", 
@@ -1449,7 +1514,11 @@ class CoresetSelect():
                 embedding_flag=embedding_flag,
                 dist=self.distance_fn,
                 data_folder=self.data_folder,
-                dnm=self.dnm
+                dnm=self.dnm,
+                multiple_pts = self.multiple_pts_per_cluster,
+                loaded=self.loaded_from_psvi,
+                alpha=self.alpha_dirichlet,
+                choose_difficult=self.choose_difficult
             )
             
         elif self.score_method in [

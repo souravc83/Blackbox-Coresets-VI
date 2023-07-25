@@ -325,6 +325,37 @@ parser.add_argument(
     help="notes on what this experiment is trying to accomplish",
 )
 
+parser.add_argument(
+    "--loaded_from_psvi",
+    action=argparse.BooleanOptionalAction,
+    help="Load the scores from PSVI",
+)
+
+parser.add_argument(
+    "--multiple_pts_per_cluster",
+    action=argparse.BooleanOptionalAction,
+    help="Should we select multiple pts from same cluster",
+)
+
+parser.add_argument(
+    "--choose_difficult",
+    action=argparse.BooleanOptionalAction,
+    help="Should we select more difficult examples in a cluster",
+)
+
+parser.add_argument(
+    "--scoring_run",
+    action=argparse.BooleanOptionalAction,
+    help="Is this run to calculate score and make embeddings",
+)
+
+parser.add_argument(
+    "--alpha_dirichlet",
+    default=0.0,
+    type=float,
+    help="Dirichlet alpha for scored kmeans",
+)
+
 
 
 
@@ -341,7 +372,11 @@ parser.set_defaults(
     learn_z=False,
     save_new_folder=False,
     load_from_saved=False,
-    last_layer_only=False
+    last_layer_only=False,
+    loaded_from_psvi=False,
+    multiple_pts_per_cluster=False,
+    choose_difficult=False,
+    scoring_run=False
 )
 
 parsed_args = parser.parse_args()
@@ -526,7 +561,12 @@ def experiment_driver(
                         results_folder=method_args["results_folder"],
                         load_from_saved=method_args["load_from_saved"],
                         distance_fn=method_args["distance_fn"],
-                        last_layer_only=method_args["last_layer_only"]
+                        last_layer_only=method_args["last_layer_only"],
+                        multiple_pts_per_cluster=method_args["multiple_pts_per_cluster"],
+                        loaded_from_psvi=method_args["loaded_from_psvi"],
+                        alpha_dirichlet=method_args["alpha_dirichlet"],
+                        choose_difficult=method_args["choose_difficult"],
+                        scoring_run=method_args["scoring_run"]
                     )
                     
                     print("Trial completed!\n")
