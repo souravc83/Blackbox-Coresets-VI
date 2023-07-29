@@ -941,7 +941,7 @@ class KmeansSelection(Selection):
 class ScoreSelection(Selection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, 
                  forgetting_flag=False, score_type='least_confidence',
-                 data_folder=None, dnm='MNIST', loaded=True):
+                 data_folder=None, dnm='MNIST', loaded=False):
         
         self.data_folder = data_folder
         self.dnm = dnm
@@ -962,8 +962,12 @@ class ScoreSelection(Selection):
         # make sure this is pretrained
         if self.loaded:
             score_arr = self._get_uncertainty_score_loaded()
+            print("Loading PSVI scores")
         else:
+            print("Calculating the scores, not loading")
             score_arr = self._get_uncertainty_score()
+            self._save_uncertainty_score(score_arr)
+            
         
         # select the top scores, for each class 
         n_train = len(self.train_dataset)
@@ -986,6 +990,9 @@ class ScoreSelection(Selection):
 
     
     def _get_uncertainty_score(self):
+        if self.score_type == "el2n":
+            return self._create_el2n_score()
+        
         softmax_fn = torch.nn.Softmax()
         n_train = len(self.train_dataset)
         data_minibatch = 128
@@ -1025,6 +1032,31 @@ class ScoreSelection(Selection):
         score_arr = torch.from_numpy(score_df[self.score_type].values)
         
         return score_arr
+    
+    def _get_score_fname(self, seed=None):
+        if seed is None:
+            seed=self.seed
+        score_fname = f'{self.score_type}_{self.dnm}_10_{seed}.csv'
+        full_score_fname = os.path.join(self.data_folder, score_fname)
+        return full_score_fname
+    
+    def _save_uncertainty_score(self, score_arr):
+        fname = self._get_score_fname()
+        np.savetxt(fname, score_arr.numpy())
+    
+    def _create_el2n_score(self):
+        all_score_list = []
+        for i in range(10):
+            seed = self.seed + i
+            fname = self._get_score_fname(seed)
+            score_np = np.loadtxt(fname)
+            all_score_list.append(score_np)
+        
+        all_score_arr = np.vstack(all_score_list).T
+        score_arr = torch.from_numpy(np.mean(all_score_arr, axis=1))
+        return score_arr
+        
+        
     
     
     # from eqn 2 https://arxiv.org/pdf/2204.08499.pdf
@@ -1084,7 +1116,7 @@ class ScoreCalculator:
 class KmeansScoreSelection(ScoreSelection):
     def __init__(self, train_dataset, num_pseudo,  nc, seed, forgetting_flag=False, 
                  score_type="least_confidence", embedding_flag=False, dist="euclidean", data_folder=None,
-                dnm='MNIST', multiple_pts = True, alpha=0, loaded=True, choose_difficult=True):
+                dnm='MNIST', multiple_pts = True, alpha=0, loaded=False, choose_difficult=True):
         
         super().__init__(train_dataset, num_pseudo,  nc, seed, forgetting_flag, score_type, 
                         data_folder, dnm, loaded)
@@ -1103,6 +1135,7 @@ class KmeansScoreSelection(ScoreSelection):
             self.score_arr = self._get_uncertainty_score_loaded()
         else:
             self.score_arr = self._get_uncertainty_score()
+            self._save_uncertainty_score(self.score_arr)
         if self.loaded:
             self._run_kmeans_loaded()
         else:

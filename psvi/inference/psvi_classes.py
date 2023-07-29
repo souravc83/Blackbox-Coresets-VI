@@ -224,6 +224,7 @@ class PSVI(object):
         self.alpha_dirichlet = alpha_dirichlet
         self.choose_difficult = choose_difficult
         self.scoring_run=scoring_run
+        self.seed = seed
         
     def pseudo_subsample_init(self):
         r"""
@@ -322,6 +323,7 @@ class PSVI(object):
             init_sd=self.init_sd,
             data_minibatch=self.data_minibatch,
             pretrain_epochs=self.pretrain_epochs,
+            seed=self.seed,
             lr0net=self.lr0net, 
             log_every=10,
             data_folder=self.data_folder,
